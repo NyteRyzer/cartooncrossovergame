@@ -1,0 +1,78 @@
+{
+  "name": "Retroville Vertical Slice",
+  "map_path": "/Game/Maps/Greybox/L_Retroville_Greybox",
+  "notes": "1 km x 1 km. SW/NW: suburbs (Neutron house + lab). NE: downtown towers (20-100 m) for hover car vertical play. SE: Lindbergh Elementary, Candy Bar, Retroland, park with hidden rocket silo. Perimeter hover-car race gates above rooftops. Boundary walls are PhaseBlockers.",
+  "bounds": { "min": [-52000, -52000, -9000], "max": [52000, 52000, 30000] },
+  "player_start": { "location": [-35000, -38500, 120], "yaw": 90 },
+  "lighting": { "sun_pitch": -50, "sun_yaw": 30 },
+  "blocks": [
+    { "label": "Ground", "shape": "cube", "location": [0, 0, -50], "size": [100000, 100000, 100], "folder": "Terrain" },
+    { "label": "Road_MainStreet_NS", "shape": "cube", "location": [0, 0, 1], "size": [1600, 100000, 2], "folder": "Roads", "no_collision": true },
+    { "label": "Road_MainStreet_EW", "shape": "cube", "location": [0, 0, 1], "size": [100000, 1600, 2], "folder": "Roads", "no_collision": true },
+
+    { "label": "Neutron_House", "shape": "cube", "location": [-35000, -35000, 450], "size": [1600, 1400, 900], "folder": "Landmarks/Neutron" },
+    { "label": "Neutron_LabClubhouse", "shape": "cube", "location": [-35000, -33900, 250], "size": [500, 500, 500], "folder": "Landmarks/Neutron" },
+    { "label": "Neutron_UndergroundLab_Volume", "shape": "cube", "location": [-35000, -34500, -1500], "size": [3000, 3000, 1000], "folder": "Landmarks/Neutron", "no_collision": true },
+
+    { "label": "School_Main", "shape": "cube", "location": [12000, -14000, 600], "size": [8000, 4000, 1200], "folder": "Landmarks/School" },
+    { "label": "School_Gym", "shape": "cube", "location": [12000, -9500, 500], "size": [3000, 3000, 1000], "folder": "Landmarks/School" },
+    { "label": "CandyBar_Diner", "shape": "cube", "location": [26000, -8000, 350], "size": [2000, 1500, 700], "folder": "Landmarks/CandyBar" },
+
+    { "label": "Park_Lawn", "shape": "cube", "location": [14000, -36000, 5], "size": [12000, 12000, 10], "folder": "Landmarks/Park" },
+    { "label": "Park_SiloHatch", "shape": "cylinder", "location": [14000, -36000, 15], "size": [1200, 1200, 20], "folder": "Landmarks/Park" },
+    { "label": "Park_SiloShaft_Volume", "shape": "cylinder", "location": [14000, -36000, -4000], "size": [1100, 1100, 8000], "folder": "Landmarks/Park", "no_collision": true },
+
+    { "label": "Retroland_FerrisWheel", "shape": "cylinder", "location": [36000, -30000, 2600], "size": [5000, 5000, 300], "pitch": 90, "folder": "Landmarks/Retroland", "no_collision": true },
+    { "label": "Retroland_Plaza", "shape": "cube", "location": [36000, -40000, 5], "size": [14000, 14000, 10], "folder": "Landmarks/Retroland" },
+
+    { "label": "Boundary_N", "shape": "cube", "location": [0, 51000, 14000], "size": [102000, 200, 28000], "folder": "Boundary", "phase_blocker": true },
+    { "label": "Boundary_S", "shape": "cube", "location": [0, -51000, 14000], "size": [102000, 200, 28000], "folder": "Boundary", "phase_blocker": true },
+    { "label": "Boundary_E", "shape": "cube", "location": [51000, 0, 14000], "size": [200, 102000, 28000], "folder": "Boundary", "phase_blocker": true },
+    { "label": "Boundary_W", "shape": "cube", "location": [-51000, 0, 14000], "size": [200, 102000, 28000], "folder": "Boundary", "phase_blocker": true }
+  ],
+  "arrays": [
+    {
+      "type": "grid", "label": "SuburbSW_House", "shape": "cube", "origin": [-46000, -46000, 0],
+      "count": [8, 8], "spacing": [5500, 5500], "size": [1400, 1200, 700], "size_jitter": [200, 200, 150],
+      "seed": 11, "skip": [[2, 2]], "folder": "Suburbs/SW"
+    },
+    {
+      "type": "grid", "label": "SuburbNW_House", "shape": "cube", "origin": [-46000, 7500, 0],
+      "count": [8, 8], "spacing": [5500, 5500], "size": [1400, 1200, 700], "size_jitter": [200, 200, 150],
+      "seed": 12, "folder": "Suburbs/NW"
+    },
+    {
+      "type": "grid", "label": "Downtown_Tower", "shape": "cube", "origin": [6000, 6000, 0],
+      "count": [6, 6], "spacing": [7000, 7000], "size": [3500, 3500, 6000], "size_jitter": [800, 800, 4000],
+      "seed": 7, "folder": "Downtown"
+    },
+    {
+      "type": "ring", "label": "Retroland_CoasterPillar", "shape": "cylinder", "count": 12, "radius": 6000,
+      "center": [36000, -40000, 1000], "size": [200, 200, 2000], "folder": "Landmarks/Retroland"
+    },
+    {
+      "type": "grid", "label": "RaceGate_S", "shape": "cube", "origin": [-42000, -48000, 750],
+      "count": [8, 1], "spacing": [12000, 1], "size": [100, 2000, 1500], "folder": "HoverRace", "no_collision": true
+    },
+    {
+      "type": "grid", "label": "RaceGate_N", "shape": "cube", "origin": [-42000, 48000, 750],
+      "count": [8, 1], "spacing": [12000, 1], "size": [100, 2000, 1500], "folder": "HoverRace", "no_collision": true
+    },
+    {
+      "type": "grid", "label": "RaceGate_W", "shape": "cube", "origin": [-48000, -42000, 750],
+      "count": [1, 8], "spacing": [1, 12000], "size": [2000, 100, 1500], "folder": "HoverRace", "no_collision": true
+    },
+    {
+      "type": "grid", "label": "RaceGate_E", "shape": "cube", "origin": [48000, -42000, 750],
+      "count": [1, 8], "spacing": [1, 12000], "size": [2000, 100, 1500], "folder": "HoverRace", "no_collision": true
+    }
+  ],
+  "markers": [
+    { "label": "HoverCar_NeutronDriveway", "class": "HoverCarPawn", "location": [-35000, -37500, 150], "yaw": 90, "folder": "Vehicles" },
+    { "label": "Rift_Downtown", "class": "TargetPoint", "location": [23500, 23500, 200], "folder": "RiftPatrols" },
+    { "label": "Rift_Suburbs", "class": "TargetPoint", "location": [-21250, -21250, 200], "folder": "RiftPatrols" },
+    { "label": "Rift_Retroland", "class": "TargetPoint", "location": [36000, -36000, 200], "folder": "RiftPatrols" },
+    { "label": "Mission_LostGoddardComponent", "class": "TargetPoint", "location": [-35000, -34500, -1400], "folder": "Missions" },
+    { "label": "Mission_RocketSilo", "class": "TargetPoint", "location": [14000, -36000, -3000], "folder": "Missions" }
+  ]
+}

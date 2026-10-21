@@ -1,0 +1,75 @@
+{
+  "name": "Nexus Observatory",
+  "map_path": "/Game/Maps/Greybox/L_Nexus_Greybox",
+  "notes": "Floating hub outside time. 120 m platform, Rift Core (Jimmy's generator) at centre, 8 dimensional terminals + portal arches on a 40 m ring, hub services on a 20 m ring, flight-test gates beyond the rim, and a scale gallery next to the player start.",
+  "bounds": { "min": [-9000, -9000, -6000], "max": [9000, 9000, 8000] },
+  "player_start": { "location": [-2800, 0, 120], "yaw": 0 },
+  "lighting": { "sun_pitch": -35, "sun_yaw": 140 },
+  "blocks": [
+    { "label": "Platform_Main", "shape": "cylinder", "location": [0, 0, -100], "size": [12000, 12000, 200], "folder": "Platform" },
+    { "label": "Platform_Underside", "shape": "cone", "location": [0, 0, -1700], "size": [9000, 9000, 3000], "pitch": 180, "folder": "Platform" },
+
+    { "label": "RiftCore_Base", "shape": "cylinder", "location": [0, 0, 150], "size": [1600, 1600, 300], "folder": "RiftCore" },
+    { "label": "RiftCore_Column", "shape": "cylinder", "location": [0, 0, 1300], "size": [600, 600, 2000], "folder": "RiftCore" },
+    { "label": "RiftCore_Orb", "shape": "sphere", "location": [0, 0, 2800], "size": [1000, 1000, 1000], "folder": "RiftCore", "no_collision": true },
+
+    { "label": "Service_MissionBoard", "shape": "cube", "location": [1848, 765, 200], "size": [200, 600, 400], "yaw": 202.5, "folder": "Services" },
+    { "label": "Service_UpgradeBench", "shape": "cube", "location": [-765, 1848, 100], "size": [400, 600, 200], "yaw": 292.5, "folder": "Services" },
+    { "label": "Service_GearLocker", "shape": "cube", "location": [-1848, -765, 150], "size": [300, 800, 300], "yaw": 22.5, "folder": "Services" },
+    { "label": "Service_RiftPatrolMap", "shape": "cylinder", "location": [765, -1848, 60], "size": [700, 700, 120], "folder": "Services" },
+
+    { "label": "Scale_KidHero_140", "shape": "cube", "location": [-2800, 500, 70], "size": [40, 40, 140], "folder": "ScaleGallery" },
+    { "label": "Scale_Adult_180", "shape": "cube", "location": [-2800, 700, 90], "size": [40, 40, 180], "folder": "ScaleGallery" },
+    { "label": "Scale_Doorway_LeftPost", "shape": "cube", "location": [-2800, 900, 120], "size": [20, 20, 240], "folder": "ScaleGallery" },
+    { "label": "Scale_Doorway_RightPost", "shape": "cube", "location": [-2800, 1040, 120], "size": [20, 20, 240], "folder": "ScaleGallery" },
+    { "label": "Scale_Doorway_Lintel", "shape": "cube", "location": [-2800, 970, 250], "size": [20, 160, 20], "folder": "ScaleGallery" },
+    { "label": "Scale_StairStep_20", "shape": "cube", "location": [-2800, 1250, 10], "size": [100, 200, 20], "folder": "ScaleGallery" },
+    { "label": "Scale_JumpReach_200", "shape": "cube", "location": [-2800, 1550, 100], "size": [200, 200, 200], "folder": "ScaleGallery" },
+    { "label": "Scale_JumpTooHigh_250", "shape": "cube", "location": [-2800, 1850, 125], "size": [200, 200, 250], "folder": "ScaleGallery" }
+  ],
+  "arrays": [
+    {
+      "type": "ring", "label": "TerminalPad", "shape": "cylinder", "count": 8, "radius": 4000,
+      "center": [0, 0, 20], "size": [800, 800, 40], "folder": "Terminals",
+      "names": ["Retroville", "Dimmsdale", "AmityPark", "Chinatown", "Tremorton", "MiracleCity", "Bellwood", "AirTemple"]
+    },
+    {
+      "type": "ring", "label": "PortalPillarL", "shape": "cube", "count": 8, "radius": 5200, "start_angle": -5,
+      "center": [0, 0, 450], "size": [150, 150, 900], "folder": "Terminals/Portals",
+      "names": ["Retroville", "Dimmsdale", "AmityPark", "Chinatown", "Tremorton", "MiracleCity", "Bellwood", "AirTemple"]
+    },
+    {
+      "type": "ring", "label": "PortalPillarR", "shape": "cube", "count": 8, "radius": 5200, "start_angle": 5,
+      "center": [0, 0, 450], "size": [150, 150, 900], "folder": "Terminals/Portals",
+      "names": ["Retroville", "Dimmsdale", "AmityPark", "Chinatown", "Tremorton", "MiracleCity", "Bellwood", "AirTemple"]
+    },
+    {
+      "type": "ring", "label": "PortalLintel", "shape": "cube", "count": 8, "radius": 5200,
+      "center": [0, 0, 975], "size": [300, 1100, 150], "folder": "Terminals/Portals",
+      "names": ["Retroville", "Dimmsdale", "AmityPark", "Chinatown", "Tremorton", "MiracleCity", "Bellwood", "AirTemple"]
+    },
+    {
+      "type": "ring", "label": "PortalSurface", "shape": "cube", "count": 8, "radius": 5260,
+      "center": [0, 0, 450], "size": [20, 750, 800], "folder": "Terminals/Portals", "no_collision": true,
+      "names": ["Retroville", "Dimmsdale", "AmityPark", "Chinatown", "Tremorton", "MiracleCity", "Bellwood", "AirTemple"]
+    },
+    {
+      "type": "ring", "label": "Railing", "shape": "cube", "count": 32, "radius": 5900,
+      "center": [0, 0, 60], "size": [60, 1150, 120], "folder": "Platform/Railings"
+    },
+    {
+      "type": "ring", "label": "FlightGate", "shape": "cube", "count": 12, "radius": 7500, "start_angle": 15,
+      "center": [0, 0, 1500], "size": [600, 100, 600], "folder": "TraversalTest", "no_collision": true
+    }
+  ],
+  "marker_arrays": [
+    {
+      "type": "ring", "label": "Terminal", "class": "DimensionalTerminal", "count": 8, "radius": 4000,
+      "center": [0, 0, 40], "folder": "Terminals",
+      "names": ["Retroville", "Dimmsdale", "AmityPark", "Chinatown", "Tremorton", "MiracleCity", "Bellwood", "AirTemple"]
+    }
+  ],
+  "markers": [
+    { "label": "HoverCar_Test", "class": "HoverCarPawn", "location": [-1500, -2500, 150], "yaw": 0, "folder": "TraversalTest" }
+  ]
+}

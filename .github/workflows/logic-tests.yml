@@ -1,0 +1,13 @@
+name: Logic tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  logic-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run engine-independent tests
+        run: Tools/run_logic_tests.sh

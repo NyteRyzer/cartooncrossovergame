@@ -1,0 +1,137 @@
+// Project Multiverse Toons - shared cel-shading / line-art functions.
+//
+// Usage: in a post-process material Custom node set
+//   Include File Paths: /Plugin/ToonRender/Private/ToonCommon.ush
+// and call one of the entry points below (see docs/RENDERING.md for graphs).
+//
+// SceneTextureLookup() is only available in post-process materials, so the
+// functions here that sample scene textures must be called from one.
+
+#pragma once
+
+// ESceneTextureId values (Engine/Source/Runtime/Engine/Classes/Materials/
+// MaterialExpressionSceneTexture.h). Verify when upgrading engine versions.
+#define TOON_PPI_SCENE_COLOR       0
+#define TOON_PPI_SCENE_DEPTH       1
+#define TOON_PPI_DIFFUSE_COLOR     2
+#define TOON_PPI_WORLD_NORMAL      8
+#define TOON_PPI_POSTPROCESS_INPUT 14
+#define TOON_PPI_CUSTOM_STENCIL    25
+
+#define TOON_UNIVERSE_COUNT 9.0
+#define TOON_SKY_DEPTH 1.0e6
+
+float ToonLuminance(float3 C)
+{
+	return dot(C, float3(0.2126, 0.7152, 0.0722));
+}
+
+// Snap a 0..N light intensity into Bands steps with a soft edge of width Softness (0..1).
+float ToonBand(float Intensity, float Bands, float Softness)
+{
+	float Scaled = Intensity * Bands;
+	float Lower = floor(Scaled);
+	float Frac = Scaled - Lower;
+	float Edge = smoothstep(0.5 - Softness * 0.5, 0.5 + Softness * 0.5, Frac);
+	return (Lower + Edge) / Bands;
+}
+
+// Recover lighting from SceneColor / DiffuseColor, quantize its luminance
+// into bands and re-apply it. Keeps Lumen's coloured bounce light (hue) while
+// giving hard cartoon shadow terminators.
+//   ShadowFloor: minimum band brightness so shadows never go fully black.
+float3 ToonQuantizeLighting(float3 SceneColor, float3 DiffuseColor, float Bands, float Softness, float ShadowFloor)
+{
+	float3 Albedo = max(DiffuseColor, 0.02);
+	float3 Lighting = SceneColor / Albedo;
+	float Lum = ToonLuminance(Lighting);
+	if (Lum <= 1e-4)
+	{
+		return Albedo * ShadowFloor;
+	}
+	float3 Tint = Lighting / Lum;
+	float Banded = max(ToonBand(Lum, Bands, Softness), ShadowFloor);
+	return Albedo * Tint * Banded;
+}
+
+float ToonLinearDepth(float2 UV)
+{
+	return SceneTextureLookup(UV, TOON_PPI_SCENE_DEPTH, false).r;
+}
+
+float3 ToonWorldNormal(float2 UV)
+{
+	return SceneTextureLookup(UV, TOON_PPI_WORLD_NORMAL, false).rgb;
+}
+
+uint ToonStencil(float2 UV)
+{
+	return (uint)round(SceneTextureLookup(UV, TOON_PPI_CUSTOM_STENCIL, false).r);
+}
+
+// Sobel edge strength (0..1) from depth and normal discontinuities.
+//   TexelSize:      1 / buffer size (SceneTexelSize node)
+//   Thickness:      sample offset in pixels
+//   DepthSensitivity / NormalSensitivity: scale before saturate
+float ToonSobelEdge(float2 UV, float2 TexelSize, float Thickness, float DepthSensitivity, float NormalSensitivity)
+{
+	const float2 Offsets[8] = {
+		float2(-1, -1), float2(0, -1), float2(1, -1),
+		float2(-1,  0),                float2(1,  0),
+		float2(-1,  1), float2(0,  1), float2(1,  1)
+	};
+	const float KX[8] = { -1, 0, 1, -2, 2, -1, 0, 1 };
+	const float KY[8] = { -1, -2, -1, 0, 0, 1, 2, 1 };
+
+	float CenterDepth = ToonLinearDepth(UV);
+	float3 CenterNormal = ToonWorldNormal(UV);
+
+	float DepthX = 0, DepthY = 0;
+	float NormalEdge = 0;
+	[unroll]
+	for (int i = 0; i < 8; ++i)
+	{
+		float2 SampleUV = UV + Offsets[i] * TexelSize * Thickness;
+		// Normalise by centre depth so distant geometry doesn't over-outline.
+		float D = ToonLinearDepth(SampleUV) / max(CenterDepth, 1.0);
+		DepthX += D * KX[i];
+		DepthY += D * KY[i];
+		NormalEdge = max(NormalEdge, 1.0 - saturate(dot(ToonWorldNormal(SampleUV), CenterNormal)));
+	}
+	float DepthEdge = sqrt(DepthX * DepthX + DepthY * DepthY);
+	return saturate(max(DepthEdge * DepthSensitivity, NormalEdge * NormalSensitivity));
+}
+
+// Per-universe line style lookup. StyleLUT is a 9x1 texture (one texel per
+// EToonUniverse, nearest filtering): R = thickness in pixels / 8,
+// G = line darkness (0 = none, 1 = black), B = normal sensitivity, A = wobble.
+// Stencil 0 (environment) uses the Nexus style.
+float4 ToonUniverseStyle(uint Stencil, Texture2D StyleLUT, SamplerState StyleLUTSampler)
+{
+	float Index = Stencil > 0 ? (float)(Stencil - 1) : 0.0;
+	float U = (Index + 0.5) / TOON_UNIVERSE_COUNT;
+	return StyleLUT.SampleLevel(StyleLUTSampler, float2(U, 0.5), 0);
+}
+
+// Full outline pass. Returns line opacity (0..1) and writes the style's darkness.
+// Picks the style of whichever object is nearer when two universes touch, so a
+// Danny Phantom silhouette keeps its thick lines against Aang's thin ones.
+float ToonOutline(float2 UV, float2 TexelSize, float DepthSensitivity, float Time,
+                  Texture2D StyleLUT, SamplerState StyleLUTSampler, out float Darkness)
+{
+	uint Stencil = ToonStencil(UV);
+	float4 Style = ToonUniverseStyle(Stencil, StyleLUT, StyleLUTSampler);
+
+	float Thickness = max(Style.r * 8.0, 0.5);
+	// Optional hand-drawn wobble, stable per screen region, animated on twos.
+	float Steps = floor(Time * 12.0);
+	float Wobble = frac(sin(dot(floor(UV / (TexelSize * 24.0)) + Steps, float2(12.9898, 78.233))) * 43758.5453);
+	Thickness *= lerp(1.0, 0.6 + Wobble * 0.8, Style.a);
+
+	Darkness = Style.g;
+	if (ToonLinearDepth(UV) > TOON_SKY_DEPTH)
+	{
+		return 0.0;
+	}
+	return ToonSobelEdge(UV, TexelSize, Thickness, DepthSensitivity, Style.b * 4.0);
+}

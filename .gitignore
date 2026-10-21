@@ -1,0 +1,25 @@
+# Unreal generated
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+.vs/
+.vscode/
+.idea/
+*.sln
+*.xcworkspace
+*.VC.db
+*.opensdf
+*.sdf
+*.suo
+compile_commands.json
+
+# Local logic-test builds
+Tools/tests/bin/
+
+# Python
+__pycache__/
+*.pyc
