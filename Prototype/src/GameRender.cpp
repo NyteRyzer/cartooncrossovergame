@@ -208,7 +208,7 @@ Camera3D Game::MakeCamera() const
 	Cam.position = ToRender(CamPos);
 	Cam.target = ToRender(Add(CamPos, Mul(CamForward(), 100.0f)));
 	Cam.up = Vector3{ 0.0f, 1.0f, 0.0f };
-	Cam.fovy = 70.0f;
+	Cam.fovy = CamFov;
 	Cam.projection = CAMERA_PERSPECTIVE;
 	return Cam;
 }
@@ -307,6 +307,7 @@ void Game::RenderScene(ToonRenderer& R, bool bTranslucent)
 		{
 			RenderCar(R, Car);
 		}
+		RenderShards(R);
 
 		// Rift gremlins.
 		for (const Enemy& E : Enemies)
@@ -850,7 +851,8 @@ void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 	{
 		return;
 	}
-	const bool bGhost = P.Intangible;
+	// Danny's dodge is a ghostly phase-dash.
+	const bool bGhost = P.Intangible || (P.Hero == HeroId::Danny && P.DodgeTime > 0.0f && !P.Flying);
 	if (bGhost != bTranslucent || (bTranslucent && R.CurrentPass() != RenderPass::Color))
 	{
 		return;
@@ -871,4 +873,30 @@ void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 	}
 
 	RenderHero3D(R, Alpha, bHurt);
+}
+
+void Game::RenderShards(ToonRenderer& R)
+{
+	const Vector3 Cam = CamPos;
+	for (const Shard& S : Shards[LevelIndex])
+	{
+		if (S.Taken || Len(Sub(S.Pos, Cam)) > 60000.0f)
+		{
+			continue;
+		}
+		const float Bob = std::sin(Time * 2.0f + S.Pos.x * 0.01f) * 18.0f;
+		const Vector3 C = Add(S.Pos, Vector3{ 0, 0, Bob });
+		const float Spin = Time * 2.2f + S.Pos.y * 0.01f;
+		const float Pulse = 0.75f + 0.25f * std::sin(Time * 5.0f);
+		// Two cones point to point: a spinning crystal.
+		R.Draw(MeshKind::Cone, MakeTransform(ToRender(Add(C, Vector3{ 0, 0, 22 })), Vector3{ 0.42f, 0.48f, 0.42f }, Spin), Color{ 190, 130, 255, 255 }, 1.4f, Pulse);
+		R.Draw(MeshKind::Cone, MakeTransform(ToRender(Add(C, Vector3{ 0, 0, -22 })), Vector3{ 0.42f, 0.48f, 0.42f }, Spin, 3.14159f), Color{ 120, 230, 255, 255 }, 1.4f, Pulse);
+		// A slow halo ring so shards read from a distance.
+		for (int k = 0; k < 8; ++k)
+		{
+			const float A = Spin * 0.5f + k * 0.785f;
+			const Vector3 Pt = Add(C, Vector3{ std::cos(A) * 70.0f, std::sin(A) * 70.0f, std::sin(Time * 3.0f + k) * 10.0f });
+			R.Draw(MeshKind::Sphere, MakeTransform(ToRender(Pt), Vector3{ 0.12f, 0.12f, 0.12f }, 0.0f), Color{ 230, 210, 255, 255 }, 0.0f, 1.0f);
+		}
+	}
 }

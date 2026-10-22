@@ -70,11 +70,32 @@ WHAT'S IN THIS BUILD
                        Q air scooter, R earth pillar (launches you up)
     Everyone: F unleashes their ultimate when the meter is full.
 
+MOVES AND FLIGHT
+  - Flight has momentum: you carve turns and bank into them, diving builds
+    speed, Shift boosts (uses energy, with a sonic boom), V barrel-rolls, and
+    holding Ctrl into the ground lands. Every flyer handles differently:
+    Danny is agile and stops on a dime, XJ9's rockets are fastest but turn
+    wide, Jake's wings bank hard and fold back for dives, Timmy surfs a
+    floaty fairy cloud.
+  - Aang's glider: look down to dive and gain speed, look up to climb; fly
+    too slowly and you stall. S air-brakes.
+  - Attacks chain into 3-hit combos; the third hit is a finisher (spins,
+    slams, kicks, double strikes). Dodges make you untouchable.
+  - Jumps have coyote time, early-release short hops, wall jumps, and
+    flips on double jumps.
+  - Rift shards: 24 crystals in Retroville and 10 in the Nexus, on rooftops
+    and up in the sky. Each one refills health, energy and ultimate.
+  - Every hero has their own idle fidgets, walk style, attack moves, dodge,
+    flight pose and emote.
+
 CONTROLS
   WASD move            Mouse look (arrow keys also work)
   Space jump / ascend  Ctrl or C descend      Shift sprint / boost
   Left click attack    Q signature ability    F ultimate
   Tab fly (flyers)     E interact             P return to Nexus
+  V or Alt dodge: roll on the ground, dash in the air, barrel roll in flight
+  Ctrl in the air: ground pound     B emote (each hero's signature pose)
+  Jump while touching a wall: wall jump (El Tigre clings and slides)
   F1 controls overlay  F11 fullscreen         Esc pause (X to quit)
   M art style: 3D models / concept-sheet cut-outs
   Hover car: W/S throttle, A/D steer, Space/Ctrl altitude, Shift boost, E exit

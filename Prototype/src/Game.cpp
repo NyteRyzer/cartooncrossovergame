@@ -103,6 +103,79 @@ namespace
 	constexpr int GlitchFormIndex = 3;
 	constexpr int OverclockFormIndex = 4;
 
+	// Per-hero flight feel: Timmy surfs a floaty fairy cloud, Danny is an agile
+	// ghost that stops on a dime, Jake's wings bank hard and dive fast, XJ9's
+	// rockets are the fastest but carve wide turns.
+	struct FlightStyle
+	{
+		float Accel;      // cm/s^2 toward the wanted speed
+		float TurnRate;   // deg/s the travel direction can swing at cruise speed
+		float Brake;      // cm/s^2 with no input
+		float BoostCost;  // energy per second while boosting
+		float MaxBank;    // degrees of visual bank into turns
+		float DiveGain;   // extra top speed when travelling straight down
+	};
+
+	FlightStyle FlightFor(HeroId Id)
+	{
+		switch (Id)
+		{
+		case HeroId::Timmy: return { 2200.0f, 150.0f, 1800.0f, 9.0f, 32.0f, 500.0f };
+		case HeroId::Danny: return { 6500.0f, 420.0f, 7000.0f, 14.0f, 45.0f, 600.0f };
+		case HeroId::Jake:  return { 3200.0f, 170.0f, 2000.0f, 16.0f, 70.0f, 1300.0f };
+		case HeroId::XJ9:   return { 3800.0f, 120.0f, 2500.0f, 18.0f, 60.0f, 800.0f };
+		default:            return { 4000.0f, 200.0f, 3000.0f, 15.0f, 45.0f, 600.0f };
+		}
+	}
+
+	Vector3 Cross(Vector3 A, Vector3 B) { return Vector3{ A.y * B.z - A.z * B.y, A.z * B.x - A.x * B.z, A.x * B.y - A.y * B.x }; }
+
+	// Turns unit vector From toward unit vector To by at most MaxRad.
+	Vector3 RotateToward(Vector3 From, Vector3 To, float MaxRad)
+	{
+		const float C = std::clamp(Dot(From, To), -1.0f, 1.0f);
+		const float Angle = std::acos(C);
+		if (Angle <= MaxRad || Angle < 1e-4f) return To;
+		Vector3 Axis = Cross(From, To);
+		if (Len(Axis) < 1e-4f) Axis = Cross(From, Vector3{ 0, 0, 1 });
+		if (Len(Axis) < 1e-4f) Axis = Vector3{ 1, 0, 0 };
+		const Vector3 Perp = Norm(Cross(Norm(Axis), From));
+		return Norm(Add(Mul(From, std::cos(MaxRad)), Mul(Perp, std::sin(MaxRad))));
+	}
+
+	// A ring of particles around Center, perpendicular to Normal (sonic booms, landings).
+	void SpawnRing(std::vector<Particle>& Out, Vector3 Center, Vector3 Normal, Color Tint, int Count, float Speed, float Size)
+	{
+		Normal = Norm(Normal);
+		Vector3 U = Cross(Normal, Vector3{ 0, 0, 1 });
+		if (Len(U) < 0.1f) U = Cross(Normal, Vector3{ 1, 0, 0 });
+		U = Norm(U);
+		const Vector3 W = Cross(Normal, U);
+		for (int i = 0; i < Count; ++i)
+		{
+			const float A = 6.2831853f * static_cast<float>(i) / static_cast<float>(Count);
+			const Vector3 Dir = Add(Mul(U, std::cos(A)), Mul(W, std::sin(A)));
+			Out.push_back(Particle{ Add(Center, Mul(Dir, 30.0f)), Mul(Dir, Speed), 0.45f, 0.45f, Size, 0.0f, Tint });
+		}
+	}
+
+	const char* EmoteLine(HeroId Id, const FormDef* Form)
+	{
+		if (Form) return Form->Name;
+		switch (Id)
+		{
+		case HeroId::Jimmy: return "Brain blast!";
+		case HeroId::Timmy: return "Cosmo! Wanda!";
+		case HeroId::Danny: return "Going ghost!";
+		case HeroId::Jake: return "Dragon up!";
+		case HeroId::XJ9: return "Hi! XJ9, ready to save the day!";
+		case HeroId::ElTigre: return "TIGRE!";
+		case HeroId::Ben: return "It's hero time!";
+		case HeroId::Aang: return "Yip yip!";
+		default: return "";
+		}
+	}
+
 	const FormDef* FormFor(int FormId)
 	{
 		if (FormId >= 0 && FormId < 3) return &Forms[FormId];
@@ -160,6 +233,7 @@ bool Game::Init(const std::string& DataDir, std::string& Error)
 		DressLevel(L, static_cast<int>(Levels.size()));
 		Levels.push_back(std::move(L));
 	}
+	SpawnShards();
 
 	unsigned Seed = 99u;
 	for (int i = 0; i < 260; ++i)
@@ -362,6 +436,14 @@ void Game::ResetPlayer()
 	P.Grappling = false;
 	P.LastSafe = P.Pos;
 	P.RespawnTimer = 0.0f;
+	P.Pounding = false;
+	P.Gliding = false;
+	P.DodgeTime = 0.0f;
+	P.EmoteTime = 0.0f;
+	P.FlipTime = 0.0f;
+	P.WallSlide = P.WallTimer = 0.0f;
+	P.FlyBank = P.FlyPitch = 0.0f;
+	P.Boosting = P.WasBoosting = false;
 	CamYaw = L.StartYaw;
 	CamPitch = -12.0f;
 	GoddardPos = Sub(P.Pos, Vector3{ 0, 0, P.H });
@@ -384,6 +466,14 @@ void Game::SelectHero(HeroId Id)
 	P.Grappling = false;
 	P.ScooterTime = 0.0f;
 	P.Energy = 100.0f;
+	P.Pounding = false;
+	P.Gliding = false;
+	P.DodgeTime = 0.0f;
+	P.EmoteTime = 0.0f;
+	P.FlipTime = 0.0f;
+	P.WallSlide = P.WallTimer = 0.0f;
+	P.FlyBank = P.FlyPitch = 0.0f;
+	P.Boosting = P.WasBoosting = false;
 	P.Omni = Omnitrix::FStateMachine(OmnitrixConfig());
 	P.AppliedForm = Omnitrix::NoForm;
 	SetPlayerSize(32.0f, 70.0f);
@@ -478,7 +568,7 @@ float Game::JumpZ() const
 
 bool Game::IsImmune() const
 {
-	if (P.Intangible || CarIndex >= 0 || P.RespawnTimer > 0.0f)
+	if (P.Intangible || CarIndex >= 0 || P.RespawnTimer > 0.0f || P.DodgeTime > 0.0f)
 	{
 		return true;
 	}
@@ -602,7 +692,13 @@ void Game::UpdateWorld(float Dt, const InputState& In)
 	// The Omnitrix runs on real time; the world slows down while the dial is open.
 	UpdateOmnitrix(Dt, In);
 	const bool bDial = P.Hero == HeroId::Ben && P.Omni.GetState() == Omnitrix::EState::Selecting;
-	const float WorldDt = bDial ? Dt * DialTimeDilation : Dt;
+	float WorldDt = bDial ? Dt * DialTimeDilation : Dt;
+	// Hit-stop: the world freezes for a few frames on big hits.
+	if (HitStop > 0.0f)
+	{
+		HitStop -= Dt;
+		WorldDt *= 0.08f;
+	}
 
 	UpdateCamera(Dt, In);
 
@@ -645,6 +741,7 @@ void Game::UpdateWorld(float Dt, const InputState& In)
 	UpdateRifts(WorldDt);
 	UpdateEffects(WorldDt);
 	UpdateCourses(Dt);
+	UpdateShards(Dt);
 
 	// Out of the world or KO'd.
 	const Level& L = Levels[LevelIndex];
@@ -670,10 +767,15 @@ void Game::UpdateCamera(float Dt, const InputState& In)
 	}
 	CamYaw = std::fmod(CamYaw + 360.0f, 360.0f);
 
+	const float Speed = Len(P.Vel);
 	float Desired = 420.0f * std::pow(P.H / 70.0f, 0.85f);
 	if (CarIndex >= 0) Desired = 950.0f;
-	else if (P.Flying) Desired += 120.0f;
+	else if (P.Flying || P.Gliding) Desired += 120.0f + 160.0f * std::clamp(Speed / 3000.0f, 0.0f, 1.0f);
 	CamDist += (Desired - CamDist) * std::min(1.0f, Dt * 5.0f);
+	// Wider field of view at speed sells the rush of flight.
+	const bool bFast = P.Flying || P.Gliding || CarIndex >= 0 || (ActiveForm() && std::string(ActiveForm()->Name) == "XLR8");
+	const float FovTarget = 70.0f + (bFast ? 18.0f * std::clamp((Speed - 1300.0f) / 2200.0f, 0.0f, 1.0f) : 0.0f) + P.BoostFx * 10.0f;
+	CamFov += (FovTarget - CamFov) * std::min(1.0f, Dt * 4.0f);
 
 	const Vector3 Focus = PlayerFocus();
 	const Vector3 Fwd = CamForward();
@@ -692,7 +794,19 @@ void Game::UpdateCamera(float Dt, const InputState& In)
 			Want = Add(Focus, Mul(ToCam, std::max(30.0f, Hit.Distance - 25.0f) / Dist));
 		}
 	}
+	// Screen shake.
+	CamShake = std::max(0.0f, CamShake - Dt * 2.5f);
+	if (CamShake > 0.0f)
+	{
+		const float Amp = CamShake * CamShake * 22.0f;
+		Want = Add(Want, Vector3{ RandRange(-Amp, Amp), RandRange(-Amp, Amp), RandRange(-Amp, Amp) });
+	}
 	CamPos = Want;
+}
+
+float Game::PlayerSpeed() const
+{
+	return Len(P.Vel);
 }
 
 void Game::ApplyForm(int FormId)
@@ -782,12 +896,17 @@ void Game::UpdatePlayer(float Dt, const InputState& In)
 	P.AttackAnim = std::max(0.0f, P.AttackAnim - Dt);
 	P.HurtFlash = std::max(0.0f, P.HurtFlash - Dt);
 	P.ScooterTime = std::max(0.0f, P.ScooterTime - Dt);
+	P.FlipTime = std::max(0.0f, P.FlipTime - Dt);
+	P.PoundLand = std::max(0.0f, P.PoundLand - Dt);
+	P.TakeoffTime = std::max(0.0f, P.TakeoffTime - Dt);
+	P.HitComboTimer -= Dt;
+	if (P.HitComboTimer <= 0.0f) P.HitCombo = 0;
 	P.RegenDelay -= Dt;
 	if (P.RegenDelay <= 0.0f)
 	{
 		P.Health = std::min(P.MaxHealth, P.Health + 8.0f * Dt);
 	}
-	if (!P.Intangible && P.BreathTime <= 0.0f)
+	if (!P.Intangible && P.BreathTime <= 0.0f && !P.Boosting)
 	{
 		P.Energy = std::min(100.0f, P.Energy + 14.0f * Dt);
 	}
@@ -802,77 +921,132 @@ void Game::UpdatePlayer(float Dt, const InputState& In)
 		else
 		{
 			P.Flying = !P.Flying;
-			if (P.Flying) P.Vel.z = std::max(P.Vel.z, 300.0f);
+			if (P.Flying)
+			{
+				// Take off with a leap.
+				P.Vel.z = std::max(P.Vel.z, P.Grounded ? 950.0f : 300.0f);
+				P.TakeoffTime = 0.45f;
+				P.Pounding = false;
+				P.Gliding = false;
+				P.EmoteTime = 0.0f;
+				SpawnRing(Particles, Sub(P.Pos, Vector3{ 0, 0, P.H }), Vector3{ 0, 0, 1 }, H.Accent, 20, 700.0f, 14.0f);
+			}
 		}
 	}
 	if (Form || !H.CanFly)
 	{
 		P.Flying = false;
 	}
-	P.Boosting = In.Boost;
+	if (!P.Flying)
+	{
+		P.Boosting = In.Boost;
+		P.WasBoosting = false;
+	}
 
 	if (P.Hero == HeroId::Danny)
 	{
 		UpdateGhost(Dt, In);
 	}
+	UpdateMoves(Dt, In);
 
 	// Desired move direction from the camera.
 	const Vector3 Fwd2D = YawDir(CamYaw);
 	const Vector3 Right2D{ -std::sin(CamYaw * Deg2Rad), std::cos(CamYaw * Deg2Rad), 0.0f };
-	Vector3 Wish = bLocked ? Vector3{} : Add(Mul(Fwd2D, In.MoveY), Mul(Right2D, In.MoveX));
+	Vector3 Wish = bLocked || P.EmoteTime > 0.0f ? Vector3{} : Add(Mul(Fwd2D, In.MoveY), Mul(Right2D, In.MoveX));
 	if (Len(Wish) > 1.0f) Wish = Norm(Wish);
 
 	if (P.Flying)
 	{
-		Vector3 Wish3 = Add(Mul(CamForward(), In.MoveY), Mul(Right2D, In.MoveX));
-		if (Len(Wish3) > 1.0f) Wish3 = Norm(Wish3);
-		const float Speed = P.Boosting ? H.FlyBoost : H.FlySpeed;
-		const float Vertical = (In.JumpHeld ? 1.0f : 0.0f) - (In.Down ? 1.0f : 0.0f);
-		Vector3 Target = Mul(Wish3, Speed);
-		Target.z += Vertical * Speed * 0.7f;
-		const float Accel = 4000.0f * Dt;
-		P.Vel.x = Approach(P.Vel.x, Target.x, Accel);
-		P.Vel.y = Approach(P.Vel.y, Target.y, Accel);
-		P.Vel.z = Approach(P.Vel.z, Target.z, Accel);
+		UpdateFlight(Dt, In);
+	}
+	else if (P.Pounding)
+	{
+		P.Vel.x = Approach(P.Vel.x, 0.0f, 5000.0f * Dt);
+		P.Vel.y = Approach(P.Vel.y, 0.0f, 5000.0f * Dt);
+		P.Vel.z = -2800.0f;
 		P.Gliding = false;
 	}
 	else
 	{
-		float Speed = WalkSpeed() * (In.Boost && !Form ? 1.45f : 1.0f);
-		const bool bRolling = Form && Form->Roll;
-		const float Accel = (P.Grounded ? (bRolling ? 2500.0f : 5000.0f) : 1800.0f) * Dt;
-
-		P.Gliding = false;
 		const bool CanGlide = (Form ? Form->Glide : H.CanGlide);
-		if (!P.Grounded && CanGlide && In.JumpHeld && P.Vel.z < 0.0f)
+		if (!P.Grounded && CanGlide && In.JumpHeld && (P.Vel.z < 0.0f || P.Gliding) && P.DodgeTime <= 0.0f && !P.Grappling)
 		{
-			P.Gliding = true;
-			Speed *= 1.6f;
+			UpdateGlide(Dt, In);
 		}
-		const Vector3 Target = Mul(Wish, Speed);
-		P.Vel.x = Approach(P.Vel.x, Target.x, Accel);
-		P.Vel.y = Approach(P.Vel.y, Target.y, Accel);
-
-		const float GravScale = Form ? Form->GravityScale : 1.0f;
-		float G = Gravity * GravScale;
-		if (P.Grappling) G *= 0.35f;
-		P.Vel.z += G * Dt;
-		if (P.Gliding) P.Vel.z = std::max(P.Vel.z, -220.0f);
-
-		if (In.Jump && !bLocked)
+		else
 		{
-			if (P.Grounded)
+			P.Gliding = false;
+			float Speed = WalkSpeed() * (In.Boost && !Form ? 1.45f : 1.0f);
+			const bool bRolling = Form && Form->Roll;
+			const float Accel = (P.Grounded ? (bRolling ? 2500.0f : 5000.0f) : 1800.0f) * Dt;
+			// A dodge keeps its dash speed until it ends.
+			if (P.DodgeTime <= 0.0f)
+			{
+				const Vector3 Target = Mul(Wish, Speed);
+				P.Vel.x = Approach(P.Vel.x, Target.x, Accel);
+				P.Vel.y = Approach(P.Vel.y, Target.y, Accel);
+			}
+
+			const float GravScale = Form ? Form->GravityScale : 1.0f;
+			float G = Gravity * GravScale;
+			if (P.Grappling) G *= 0.35f;
+			if (P.DodgeAir && P.DodgeTime > 0.0f) G *= 0.3f; // air dashes hang for a moment
+			P.Vel.z += G * Dt;
+			// Sliding down a wall: El Tigre digs his claws in, everyone else just slows.
+			if (P.WallSlide > 0.0f && P.Vel.z < 0.0f)
+			{
+				P.Vel.z = std::max(P.Vel.z, P.Hero == HeroId::ElTigre && !Form ? -220.0f : -650.0f);
+			}
+		}
+
+		// Jumps: coyote time after walking off a ledge, buffered presses before
+		// landing, wall jumps, air jumps (with a flip), and variable height.
+		P.Coyote = P.Grounded ? 0.12f : P.Coyote - Dt;
+		P.JumpBuffer = In.Jump ? 0.14f : P.JumpBuffer - Dt;
+		if (P.JumpBuffer > 0.0f && !bLocked)
+		{
+			const bool bWallJumper = !Form || std::string(Form->Name) == "XLR8";
+			if (P.Grounded || P.Coyote > 0.0f)
 			{
 				P.Vel.z = JumpZ();
 				P.Grounded = false;
+				P.Coyote = 0.0f;
+				P.JumpBuffer = 0.0f;
+				P.JumpCut = true;
+				P.EmoteTime = 0.0f;
 			}
-			else if (P.AirJumpsLeft > 0 && !Form)
+			else if (In.Jump && P.WallTimer > 0.0f && bWallJumper)
+			{
+				P.Vel.x = P.WallNormal.x * 800.0f;
+				P.Vel.y = P.WallNormal.y * 800.0f;
+				P.Vel.z = JumpZ() * 0.95f;
+				P.Yaw = YawOf(P.WallNormal);
+				P.WallTimer = 0.0f;
+				P.WallSlide = 0.0f;
+				P.JumpBuffer = 0.0f;
+				P.JumpCut = true;
+				P.AirDashUsed = false;
+				P.FlipTime = P.Hero == HeroId::ElTigre || P.Hero == HeroId::Aang ? 0.5f : 0.0f;
+				++WallJumpCount;
+				SpawnRing(Particles, Sub(P.Pos, Mul(P.WallNormal, P.R)), P.WallNormal, Color{ 230, 230, 230, 255 }, 14, 400.0f, 10.0f);
+			}
+			else if (In.Jump && P.AirJumpsLeft > 0 && !Form)
 			{
 				P.Vel.z = JumpZ() * 0.9f;
 				--P.AirJumpsLeft;
-				SpawnBurst(Sub(P.Pos, Vector3{ 0, 0, P.H }), Color{ 230, 245, 255, 255 }, 14, 400.0f);
+				P.JumpBuffer = 0.0f;
+				P.JumpCut = false;
+				P.FlipTime = 0.5f;
+				SpawnRing(Particles, Sub(P.Pos, Vector3{ 0, 0, P.H }), Vector3{ 0, 0, 1 }, Color{ 230, 245, 255, 255 }, 16, 500.0f, 12.0f);
 			}
 		}
+		// Let go of jump early for a short hop.
+		if (P.JumpCut && !In.JumpHeld && P.Vel.z > 0.0f)
+		{
+			P.Vel.z *= 0.5f;
+			P.JumpCut = false;
+		}
+		if (P.Vel.z <= 0.0f) P.JumpCut = false;
 	}
 
 	// El Tigre's grappling chain.
@@ -900,6 +1074,8 @@ void Game::UpdatePlayer(float Dt, const InputState& In)
 			{
 				P.Grappling = false;
 				P.AirJumpsLeft = H.AirJumps;
+				// Swing off the end of the chain with a flip.
+				if (!P.Grounded) P.FlipTime = 0.5f;
 			}
 			else
 			{
@@ -925,12 +1101,37 @@ void Game::UpdatePlayer(float Dt, const InputState& In)
 	const float ScreenRight = P.Vel.x * -std::sin(CamYaw * Deg2Rad) + P.Vel.y * std::cos(CamYaw * Deg2Rad);
 	if (ScreenRight < -80.0f) P.SpriteFlip = true;
 	else if (ScreenRight > 80.0f) P.SpriteFlip = false;
+	if (C.Grounded && !WasGrounded)
+	{
+		P.AirDashUsed = false;
+		P.FlipTime = 0.0f;
+		if (P.Pounding)
+		{
+			// Ground pound impact: a shockwave scaled to the hero.
+			P.Pounding = false;
+			P.PoundLand = 0.35f;
+			++Pounds;
+			const Vector3 Feet = Sub(P.Pos, Vector3{ 0, 0, P.H });
+			const float Size = std::max(1.0f, P.H / 70.0f);
+			Shockwaves.push_back(Shockwave{ Feet, 0.0f, 650.0f * std::sqrt(Size), 5000.0f, 35.0f * Size, H.Accent, {} });
+			SpawnRing(Particles, Add(Feet, Vector3{ 0, 0, 15 }), Vector3{ 0, 0, 1 }, Color{ 215, 205, 185, 255 }, 32, 1300.0f, 20.0f * std::sqrt(Size));
+			SpawnBurst(Feet, Color{ 200, 190, 170, 255 }, 24, 700.0f, 16.0f, -1500.0f);
+			CamShake = std::max(CamShake, 0.8f);
+		}
+	}
+	if (P.Flying && C.Grounded && In.Down && !P.Intangible)
+	{
+		// Hold descend into the ground to land.
+		P.Flying = false;
+		P.LandTimer = 0.18f;
+	}
 	if (C.Grounded && P.Vel.z < 0.0f)
 	{
 		if (!WasGrounded && P.Vel.z < -1400.0f && P.H > 300.0f)
 		{
 			// Way Big landing quake.
 			Shockwaves.push_back(Shockwave{ Sub(P.Pos, Vector3{ 0, 0, P.H }), 0.0f, 1800.0f, 6000.0f, 60.0f, Color{ 255, 255, 255, 255 }, {} });
+			CamShake = std::max(CamShake, 1.0f);
 		}
 		P.Vel.z = 0.0f;
 	}
@@ -942,9 +1143,21 @@ void Game::UpdatePlayer(float Dt, const InputState& In)
 	{
 		P.Vel.z = 0.0f;
 	}
+	// Walls: remember the last one touched in the air for wall jumps / slides.
+	P.WallTimer -= Dt;
+	P.WallSlide -= Dt;
 	if (C.HitWall)
 	{
 		const float Into = Dot(P.Vel, C.WallNormal);
+		if (!P.Grounded && !P.Flying && !P.Pounding && Len2D(C.WallNormal) > 0.5f)
+		{
+			P.WallTimer = 0.22f;
+			P.WallNormal = Norm(Vector3{ C.WallNormal.x, C.WallNormal.y, 0.0f });
+			if (Dot(Wish, P.WallNormal) < -0.3f && P.Vel.z < 0.0f && !P.Gliding)
+			{
+				P.WallSlide = 0.15f;
+			}
+		}
 		if (Into < 0.0f)
 		{
 			P.Vel = Sub(P.Vel, Mul(C.WallNormal, Into));
@@ -954,18 +1167,305 @@ void Game::UpdatePlayer(float Dt, const InputState& In)
 			P.Grappling = false;
 		}
 	}
+	if (P.Grounded) P.WallSlide = 0.0f;
 
 	// Facing.
 	const float HSpeed = Len2D(P.Vel);
-	if (P.AttackAnim > 0.0f || P.BreathTime > 0.0f)
+	if (P.WallSlide > 0.0f)
+	{
+		P.Yaw += AngleDelta(P.Yaw, YawOf(Mul(P.WallNormal, -1.0f))) * std::min(1.0f, Dt * 15.0f);
+	}
+	else if (P.DodgeTime > 0.0f && !P.Flying)
+	{
+		// Keep facing the dodge direction.
+	}
+	else if (P.AttackAnim > 0.0f || P.BreathTime > 0.0f)
 	{
 		P.Yaw += AngleDelta(P.Yaw, CamYaw) * std::min(1.0f, Dt * 20.0f);
 	}
-	else if (HSpeed > 30.0f)
+	else if (HSpeed > 30.0f && P.EmoteTime <= 0.0f)
 	{
-		P.Yaw += AngleDelta(P.Yaw, YawOf(P.Vel)) * std::min(1.0f, Dt * 12.0f);
+		P.Yaw += AngleDelta(P.Yaw, YawOf(P.Vel)) * std::min(1.0f, Dt * (P.Flying ? 6.0f : 12.0f));
 	}
 	P.WalkPhase += HSpeed * Dt * 0.025f * (70.0f / P.H);
+	if (P.Grounded && HSpeed < 30.0f && P.AttackAnim <= 0.0f && P.DodgeTime <= 0.0f)
+	{
+		P.IdleTime += Dt;
+	}
+	else
+	{
+		P.IdleTime = 0.0f;
+	}
+}
+
+void Game::UpdateFlight(float Dt, const InputState& In)
+{
+	const HeroDef& H = Hero();
+	const FlightStyle S = FlightFor(P.Hero);
+	const Vector3 Right2D{ -std::sin(CamYaw * Deg2Rad), std::cos(CamYaw * Deg2Rad), 0.0f };
+	Vector3 Wish = P.EmoteTime > 0.0f ? Vector3{} : Add(Mul(CamForward(), In.MoveY), Mul(Right2D, In.MoveX));
+	Wish.z += ((In.JumpHeld ? 1.0f : 0.0f) - (In.Down ? 1.0f : 0.0f)) * 0.75f;
+	if (Len(Wish) > 1.0f) Wish = Norm(Wish);
+	const float WishLen = Len(Wish);
+
+	// Boost burns energy; an empty tank drops you back to cruise speed.
+	const bool bBoost = In.Boost && P.Energy > 1.0f && WishLen > 0.1f;
+	if (bBoost) P.Energy = std::max(0.0f, P.Energy - S.BoostCost * Dt);
+	P.Boosting = bBoost;
+
+	const Vector3 OldVel = P.Vel;
+	float Spd = Len(P.Vel);
+	const Vector3 Dir = Spd > 1.0f ? Mul(P.Vel, 1.0f / Spd) : Vector3{ 0, 0, 1 };
+	Vector3 V = P.Vel;
+	if (WishLen > 0.05f)
+	{
+		const Vector3 WishDir = Norm(Wish);
+		// Diving trades altitude for speed; climbing costs some.
+		float Top = (bBoost ? H.FlyBoost : H.FlySpeed) * WishLen;
+		Top += -Dir.z * S.DiveGain;
+		// Momentum: the travel direction swings toward the input at the hero's
+		// turn rate. Slow flight turns freely, cruise speed carves arcs.
+		const float Slow = std::clamp(1.0f - Spd / H.FlySpeed, 0.0f, 1.0f);
+		const float Turn = S.TurnRate * (1.0f + 4.0f * Slow) * (bBoost ? 0.8f : 1.0f) * Deg2Rad * Dt;
+		const Vector3 NewDir = Spd > 150.0f ? RotateToward(Dir, WishDir, Turn) : WishDir;
+		// Steering against the motion bleeds speed (air brake).
+		const float Against = std::max(0.0f, -Dot(Dir, WishDir));
+		Spd = Approach(Spd, Top * (1.0f - 0.5f * Against), (Spd < Top ? S.Accel : S.Accel * 0.7f) * Dt);
+		V = Mul(NewDir, Spd);
+	}
+	else
+	{
+		Spd = Approach(Spd, 0.0f, S.Brake * Dt);
+		V = Mul(Dir, Spd);
+	}
+	// The take-off leap carries upward for a moment.
+	if (P.TakeoffTime > 0.0f)
+	{
+		V.z = std::max(V.z, 700.0f * (P.TakeoffTime / 0.45f));
+	}
+	P.Vel = V;
+
+	// Visual bank from the turn rate and strafing, pitch from the climb angle.
+	const float HSpd = Len2D(V);
+	float YawRate = 0.0f;
+	if (HSpd > 100.0f && Len2D(OldVel) > 100.0f && Dt > 0.0f)
+	{
+		YawRate = AngleDelta(YawOf(OldVel), YawOf(V)) / Dt;
+	}
+	const float BankTarget = std::clamp(YawRate * 0.22f + In.MoveX * 20.0f, -S.MaxBank, S.MaxBank) * std::clamp(HSpd / 500.0f, 0.0f, 1.0f);
+	P.FlyBank += (BankTarget - P.FlyBank) * std::min(1.0f, Dt * 5.0f);
+	const float PitchTarget = Spd > 150.0f ? std::atan2(V.z, HSpd) / Deg2Rad : 0.0f;
+	P.FlyPitch += (PitchTarget - P.FlyPitch) * std::min(1.0f, Dt * 6.0f);
+
+	// Wing beats speed up when climbing or boosting; diving folds the wings.
+	const bool bDive = V.z < -700.0f && !bBoost;
+	P.FlapPhase += Dt * (bDive ? 1.0f : 6.0f + (bBoost ? 5.0f : 0.0f) + std::max(0.0f, V.z) / 300.0f);
+
+	// Sonic boom when a boost kicks in at speed.
+	if (bBoost && !P.WasBoosting && Spd > 400.0f)
+	{
+		SpawnRing(Particles, P.Pos, Dir, Color{ 235, 245, 255, 255 }, 26, 900.0f, 14.0f);
+		CamShake = std::max(CamShake, 0.35f);
+		P.BoostFx = 0.4f;
+	}
+	P.WasBoosting = bBoost;
+	P.BoostFx = std::max(0.0f, P.BoostFx - Dt);
+
+	// Trails.
+	const Vector3 Back = Spd > 300.0f ? Mul(Dir, -1.0f) : Vector3{ 0, 0, -1 };
+	switch (P.Hero)
+	{
+	case HeroId::Danny:
+		if (Spd > 200.0f)
+		{
+			const Vector3 At = Add(P.Pos, Add(Mul(Back, P.H * 0.6f), Vector3{ RandRange(-15, 15), RandRange(-15, 15), RandRange(-15, 15) }));
+			Particles.push_back(Particle{ At, Mul(Back, 150.0f), 0.6f, 0.6f, RandRange(12, 22), 0.0f, Rand01() < 0.7f ? Color{ 120, 255, 170, 255 } : Color{ 240, 255, 250, 255 } });
+		}
+		break;
+	case HeroId::XJ9:
+		for (int k = 0; k < 2; ++k)
+		{
+			const Vector3 Feet = Add(P.Pos, Mul(Back, P.H * 0.95f));
+			const Vector3 Jit{ RandRange(-60, 60), RandRange(-60, 60), RandRange(-60, 60) };
+			Particles.push_back(Particle{ Feet, Add(Mul(Back, 900.0f + (bBoost ? 900.0f : 0.0f)), Jit), 0.22f, 0.22f, RandRange(14, 24), 0.0f,
+				k == 0 ? Color{ 255, 200, 70, 255 } : Color{ 255, 120, 40, 255 } });
+		}
+		if (Rand01() < 0.3f)
+		{
+			Particles.push_back(Particle{ Add(P.Pos, Mul(Back, P.H * 1.3f)), Mul(Back, 200.0f), 0.8f, 0.8f, RandRange(18, 30), 60.0f, Color{ 200, 205, 215, 255 } });
+		}
+		break;
+	case HeroId::Timmy:
+		if (Rand01() < 0.7f)
+		{
+			const Vector3 At = Add(P.Pos, Vector3{ RandRange(-40, 40), RandRange(-40, 40), -P.H - 10.0f });
+			const Color Tints[3] = { { 255, 230, 80, 255 }, { 245, 140, 200, 255 }, { 150, 230, 140, 255 } };
+			Particles.push_back(Particle{ At, Add(Mul(Back, 200.0f), Vector3{ 0, 0, -60 }), 0.8f, 0.8f, RandRange(8, 14), -150.0f, Tints[static_cast<int>(Rand01() * 2.99f)] });
+		}
+		break;
+	case HeroId::Jake:
+		if (bBoost || Spd > 2400.0f)
+		{
+			const Vector3 Side{ -std::sin(P.Yaw * Deg2Rad), std::cos(P.Yaw * Deg2Rad), 0.0f };
+			for (int s = -1; s <= 1; s += 2)
+			{
+				Particles.push_back(Particle{ Add(P.Pos, Mul(Side, s * P.H * 1.6f)), Mul(Back, 100.0f), 0.3f, 0.3f, 8.0f, 0.0f, Color{ 245, 245, 255, 255 } });
+			}
+		}
+		break;
+	default:
+		break;
+	}
+	// Speed lines at high speed.
+	if (Spd > 1900.0f)
+	{
+		const Vector3 At = Add(P.Pos, Vector3{ RandRange(-260, 260), RandRange(-260, 260), RandRange(-200, 200) });
+		Particles.push_back(Particle{ At, Mul(Dir, Spd * 0.35f), 0.25f, 0.25f, 6.0f, 0.0f, Color{ 240, 248, 255, 255 } });
+	}
+}
+
+void Game::UpdateGlide(float Dt, const InputState& In)
+{
+	// Hang-glider physics: look down to dive and pick up speed, look up to
+	// climb and bleed it off; fly too slowly and you stall and sink.
+	const float HSpd = Len2D(P.Vel);
+	if (!P.Gliding)
+	{
+		P.Gliding = true;
+		P.GlideSpeed = std::max(HSpd, 950.0f);
+	}
+	const float Pitch = std::clamp(CamPitch + 8.0f, -55.0f, 25.0f) * Deg2Rad;
+	P.GlideSpeed += (-std::sin(Pitch) * 1700.0f - (P.GlideSpeed - 1150.0f) * 0.35f) * Dt;
+	P.GlideSpeed = std::clamp(P.GlideSpeed, 650.0f, 2900.0f);
+
+	const float TravelYaw = HSpd > 50.0f ? YawOf(P.Vel) : CamYaw;
+	const float TargetYaw = CamYaw + In.MoveX * 40.0f;
+	const float MaxTurn = (In.MoveY < -0.5f ? 160.0f : 110.0f) * Dt;
+	const float Step = std::clamp(AngleDelta(TravelYaw, TargetYaw), -MaxTurn, MaxTurn);
+	const float NewYaw = TravelYaw + Step;
+	// S air-brakes.
+	if (In.MoveY < -0.5f) P.GlideSpeed = std::max(650.0f, P.GlideSpeed - 900.0f * Dt);
+
+	const Vector3 Flat = Mul(YawDir(NewYaw), P.GlideSpeed * std::cos(Pitch));
+	P.Vel.x = Flat.x;
+	P.Vel.y = Flat.y;
+	float Vz = std::sin(Pitch) * P.GlideSpeed * 0.7f - 170.0f;
+	if (P.GlideSpeed < 850.0f) Vz -= (850.0f - P.GlideSpeed) * 1.6f; // stall
+	P.Vel.z = Approach(P.Vel.z, Vz, 3000.0f * Dt);
+
+	const float YawRate = Dt > 0.0f ? Step / Dt : 0.0f;
+	P.FlyBank += (std::clamp(YawRate * 0.35f, -45.0f, 45.0f) - P.FlyBank) * std::min(1.0f, Dt * 5.0f);
+	P.FlyPitch += (std::atan2(P.Vel.z, std::max(1.0f, Len2D(P.Vel))) / Deg2Rad - P.FlyPitch) * std::min(1.0f, Dt * 6.0f);
+	if (P.GlideSpeed > 1800.0f && Rand01() < 0.5f)
+	{
+		const Vector3 At = Add(P.Pos, Vector3{ RandRange(-200, 200), RandRange(-200, 200), RandRange(-150, 150) });
+		Particles.push_back(Particle{ At, Mul(P.Vel, 0.35f), 0.25f, 0.25f, 6.0f, 0.0f, Color{ 240, 248, 255, 255 } });
+	}
+}
+
+void Game::UpdateMoves(float Dt, const InputState& In)
+{
+	const Level& L = Levels[LevelIndex];
+	const HeroDef& H = Hero();
+	const FormDef* Form = ActiveForm();
+	const std::string FormName = Form ? Form->Name : "";
+	const bool bLocked = P.Hero == HeroId::Ben && P.Omni.IsInputLocked();
+
+	P.DodgeCd -= Dt;
+	if (P.DodgeTime > 0.0f)
+	{
+		P.DodgeTime = std::max(0.0f, P.DodgeTime - Dt);
+	}
+
+	// Dodge: a roll on the ground, a dash in the air, a barrel roll in flight.
+	// All of them dodge damage while they last.
+	const bool bCanDodge = !bLocked && !P.Grappling && FormName != "Cannonbolt" && FormName != "Way Big" && P.DodgeCd <= 0.0f;
+	if (In.Dodge && bCanDodge)
+	{
+		const Vector3 Fwd2D = YawDir(CamYaw);
+		const Vector3 Right2D{ -std::sin(CamYaw * Deg2Rad), std::cos(CamYaw * Deg2Rad), 0.0f };
+		Vector3 Wish = Add(Mul(Fwd2D, In.MoveY), Mul(Right2D, In.MoveX));
+		if (P.Flying)
+		{
+			P.DodgeSide = In.MoveX < -0.1f ? -1 : 1;
+			P.Vel = Add(P.Vel, Mul(Right2D, P.DodgeSide * 1600.0f));
+			P.DodgeTime = 0.45f;
+			P.DodgeAir = true;
+			P.DodgeCd = 0.55f;
+			SpawnRing(Particles, P.Pos, YawDir(P.Yaw), Color{ 235, 245, 255, 255 }, 16, 500.0f, 10.0f);
+		}
+		else if (P.Grounded || !P.AirDashUsed)
+		{
+			if (Len(Wish) < 0.1f) Wish = YawDir(P.Yaw);
+			P.DodgeDir = Norm(Wish);
+			const float Dash = FormName == "XLR8" ? 3400.0f : (FormName == "Four Arms" ? 1500.0f : 1750.0f);
+			P.Vel.x = P.DodgeDir.x * Dash;
+			P.Vel.y = P.DodgeDir.y * Dash;
+			P.DodgeAir = !P.Grounded;
+			if (P.DodgeAir)
+			{
+				P.Vel.z = std::max(P.Vel.z, 150.0f);
+				P.AirDashUsed = true;
+			}
+			P.DodgeTime = P.DodgeAir ? 0.32f : 0.4f;
+			P.DodgeCd = 0.6f;
+			P.Yaw = YawOf(P.DodgeDir);
+			P.EmoteTime = 0.0f;
+			P.Pounding = false;
+			const Vector3 Mid = Sub(P.Pos, Vector3{ 0, 0, P.H * 0.3f });
+			if (P.Hero == HeroId::Danny && !Form) SpawnBurst(P.Pos, Color{ 120, 255, 170, 255 }, 20, 400.0f, 14.0f);
+			else if (P.Hero == HeroId::Aang && !Form) SpawnRing(Particles, Mid, Vector3{ 0, 0, 1 }, Color{ 225, 240, 255, 255 }, 24, 600.0f, 14.0f);
+			else if (P.Hero == HeroId::XJ9) SpawnBurst(Sub(P.Pos, Vector3{ 0, 0, P.H }), Color{ 255, 190, 60, 255 }, 18, 500.0f, 14.0f);
+			else if (FormName == "Heatblast") SpawnBurst(Mid, Color{ 255, 150, 30, 255 }, 24, 600.0f, 16.0f);
+			else if (FormName == "XLR8") SpawnBurst(Mid, Color{ 120, 180, 255, 255 }, 18, 300.0f, 12.0f);
+			else if (P.Grounded) SpawnBurst(Sub(P.Pos, Vector3{ 0, 0, P.H }), Color{ 210, 200, 180, 255 }, 12, 300.0f, 12.0f, -600.0f);
+		}
+	}
+	const bool bAfterimages = FormName == "XLR8" || (P.Hero == HeroId::Danny && !Form);
+	if (P.DodgeTime > 0.0f && !P.Flying && !P.DodgeAir && bAfterimages)
+	{
+		// Afterimages for the speedsters.
+		Particles.push_back(Particle{ P.Pos, Vector3{}, 0.3f, 0.3f, P.R * 0.9f, 0.0f, Form ? Color{ 90, 140, 230, 255 } : Color{ 120, 255, 170, 255 } });
+	}
+	if (P.DodgeTime <= 0.0f && P.Grounded) P.DodgeAir = false;
+
+	// Ground pound: press descend in the air.
+	if (In.DownPressed && !P.Grounded && !P.Flying && !P.Pounding && !bLocked && FormName != "Cannonbolt" && !P.Intangible && !P.Grappling)
+	{
+		const RayHit Below = Raycast(L, P.Pos, Vector3{ 0, 0, -1 }, P.H + 160.0f);
+		if (!Below.Hit)
+		{
+			P.Pounding = true;
+			P.Gliding = false;
+			P.FlipTime = 0.0f;
+			P.DodgeTime = 0.0f;
+			SpawnBurst(P.Pos, H.Accent, 10, 300.0f, 10.0f);
+		}
+	}
+
+	// Emotes: the hero's signature pose.
+	if (In.Emote && P.Grounded && !P.Flying && P.EmoteTime <= 0.0f && FormName != "Cannonbolt")
+	{
+		P.EmoteTime = 2.4f;
+		Say(EmoteLine(P.Hero, Form), Form ? Form->Accent : H.Accent, 2.0f);
+	}
+	if (P.EmoteTime > 0.0f)
+	{
+		const float Before = P.EmoteTime;
+		P.EmoteTime -= Dt;
+		if (std::fabs(In.MoveX) + std::fabs(In.MoveY) > 0.1f || !P.Grounded || In.Attack)
+		{
+			P.EmoteTime = 0.0f;
+		}
+		else if (Before > 1.2f && P.EmoteTime <= 1.2f)
+		{
+			// The pose's big moment.
+			const Color Fx = Form ? Form->Accent : H.Accent;
+			SpawnRing(Particles, P.Pos, Vector3{ 0, 0, 1 }, Fx, 28, 800.0f, 14.0f);
+			SpawnBurst(Add(P.Pos, Vector3{ 0, 0, P.H * 0.5f }), Fx, 24, 500.0f, 12.0f);
+		}
+		P.EmoteTime = std::max(0.0f, P.EmoteTime);
+	}
 }
 
 void Game::UpdateGhost(float Dt, const InputState& In)
@@ -1241,7 +1741,8 @@ void Game::UpdateCombat(float Dt, const InputState& In)
 	if ((In.Attack || (Rapid && In.AttackHeld)) && P.AttackCd <= 0.0f && CanAttack() && A.Kind != AttackKind::None)
 	{
 		DoAttack(A);
-		P.AttackCd = A.Cooldown;
+		P.AttackCd = A.Cooldown + (P.AttackStep == 2 ? 0.15f : 0.0f);
+		P.EmoteTime = 0.0f;
 	}
 
 	// Cannonbolt: rolling contact damage.
@@ -1388,7 +1889,15 @@ void Game::TriggerUltimate()
 
 void Game::DoAttack(const AttackDef& A)
 {
-	P.AttackAnim = 0.25f;
+	// Three-hit combos for everything but rapid fire: the third hit is a finisher.
+	const bool bCombo = A.Cooldown >= 0.2f;
+	P.AttackStep = bCombo && Time - P.LastAttack < A.Cooldown + 0.5f ? (P.AttackStep + 1) % 3 : 0;
+	P.LastAttack = Time;
+	const bool bFinisher = bCombo && P.AttackStep == 2;
+	const float DmgMul = bFinisher ? 1.8f : 1.0f;
+	const float KnockMul = bFinisher ? 1.7f : 1.0f;
+	P.AttackDur = bFinisher ? 0.38f : 0.25f;
+	P.AttackAnim = P.AttackDur;
 	const Vector3 Aim = AimPoint();
 	const Vector3 Chest = Add(P.Pos, Vector3{ 0, 0, P.H * 0.35f });
 
@@ -1402,9 +1911,9 @@ void Game::DoAttack(const AttackDef& A)
 			Projectile Pr;
 			Pr.Pos = Add(Chest, Mul(Dir, P.R + 15.0f));
 			Pr.Vel = Mul(Norm(Add(Dir, Mul(Right, Spread))), A.Speed);
-			Pr.Damage = A.Damage;
-			Pr.Radius = A.Radius;
-			Pr.Knockback = A.Knockback;
+			Pr.Damage = A.Damage * DmgMul;
+			Pr.Radius = A.Radius * (bFinisher ? 1.7f : 1.0f);
+			Pr.Knockback = A.Knockback * KnockMul;
 			Pr.Tint = A.Tint;
 			Pr.Life = 2.5f;
 			Projectiles.push_back(Pr);
@@ -1414,19 +1923,36 @@ void Game::DoAttack(const AttackDef& A)
 	{
 		const Vector3 Facing = YawDir(CamYaw);
 		P.Yaw = CamYaw;
+		const float Range = A.Range * (bFinisher ? 1.3f : 1.0f);
+		bool bHit = false;
 		for (int i = static_cast<int>(Enemies.size()) - 1; i >= 0; --i)
 		{
 			const Vector3 To = Sub(Enemies[i].Pos, P.Pos);
 			const float D = Len2D(To);
-			if (D < A.Range + P.R + 45.0f && std::fabs(To.z) < P.H + 120.0f && Dot(Norm(Vector3{ To.x, To.y, 0 }), Facing) > 0.2f)
+			// Finishers hit all the way around (spins, slams).
+			const float MinDot = bFinisher ? -1.0f : 0.2f;
+			if (D < Range + P.R + 45.0f && std::fabs(To.z) < P.H + 120.0f && Dot(Norm(Vector3{ To.x, To.y, 0 }), Facing) > MinDot)
 			{
-				Vector3 Knock = Mul(Norm(Vector3{ To.x, To.y, 0 }), A.Knockback);
-				Knock.z = A.Knockback * 0.4f;
-				DamageEnemy(i, A.Damage, Knock);
+				Vector3 Knock = Mul(Norm(Vector3{ To.x, To.y, 0 }), A.Knockback * KnockMul);
+				Knock.z = A.Knockback * KnockMul * 0.4f;
+				DamageEnemy(i, A.Damage * DmgMul, Knock);
+				bHit = true;
 			}
 		}
-		const Vector3 Hand = Add(Add(P.Pos, Vector3{ 0, 0, P.H * 0.3f }), Mul(Facing, P.R + A.Range * 0.5f));
-		SpawnBurst(Hand, A.Tint, 8, 300.0f, 10.0f + P.H * 0.05f);
+		if (bHit)
+		{
+			HitStop = std::max(HitStop, bFinisher ? 0.08f : 0.035f);
+			CamShake = std::max(CamShake, bFinisher ? 0.45f : 0.2f);
+		}
+		// A short lunge carries melee heroes into the hit.
+		if (P.Grounded)
+		{
+			P.Vel.x += Facing.x * (bFinisher ? 500.0f : 300.0f);
+			P.Vel.y += Facing.y * (bFinisher ? 500.0f : 300.0f);
+		}
+		const Vector3 Hand = Add(Add(P.Pos, Vector3{ 0, 0, P.H * 0.3f }), Mul(Facing, P.R + Range * 0.5f));
+		SpawnBurst(Hand, A.Tint, bFinisher ? 20 : 8, bFinisher ? 600.0f : 300.0f, 10.0f + P.H * 0.05f);
+		if (bFinisher) SpawnRing(Particles, Sub(P.Pos, Vector3{ 0, 0, P.H * 0.5f }), Vector3{ 0, 0, 1 }, A.Tint, 20, 900.0f, 12.0f);
 	}
 }
 
@@ -1462,6 +1988,8 @@ void Game::DamageEnemy(int Index, float Amount, Vector3 Knock)
 	E.HitFlash = 0.12f;
 	E.Vel = Add(E.Vel, Knock);
 	P.Meter = std::min(100.0f, P.Meter + Amount * 0.06f);
+	++P.HitCombo;
+	P.HitComboTimer = 2.0f;
 	if (E.Health <= 0.0f)
 	{
 		KillEnemy(Index);
@@ -1695,6 +2223,10 @@ void Game::UpdateEffects(float Dt)
 		Pa.Pos = Add(Pa.Pos, Mul(Pa.Vel, Dt));
 		if (Pa.Life <= 0.0f) Particles.erase(Particles.begin() + i);
 	}
+	if (Particles.size() > 2000)
+	{
+		Particles.erase(Particles.begin(), Particles.begin() + (Particles.size() - 2000));
+	}
 
 	for (int s = static_cast<int>(Shockwaves.size()) - 1; s >= 0; --s)
 	{
@@ -1841,6 +2373,98 @@ void Game::UpdateCourses(float Dt)
 			Say(Buf, Color{ 140, 255, 200, 255 }, 5.0f);
 			Banner = Record ? "NEW BEST TIME!" : "FINISH!";
 			BannerTime = 2.5f;
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Rift shards: collectibles on rooftops, ledges and up in the sky
+// ---------------------------------------------------------------------------
+
+void Game::SpawnShards()
+{
+	Shards.assign(Levels.size(), {});
+	for (size_t Li = 0; Li < Levels.size(); ++Li)
+	{
+		const Level& L = Levels[Li];
+		const int Want = Li == 0 ? 10 : 24;
+		unsigned Seed = 4242u + static_cast<unsigned>(Li) * 977u;
+		const Vector3 Lo = L.BoundsMin, Hi = L.BoundsMax;
+		const float SpanX = Hi.x - Lo.x, SpanY = Hi.y - Lo.y;
+		const float MinGap = std::max(SpanX, SpanY) / (Li == 0 ? 8.0f : 9.0f);
+		for (int Try = 0; Try < 2000 && static_cast<int>(Shards[Li].size()) < Want; ++Try)
+		{
+			const Vector3 Top{ Lo.x + SpanX * (0.08f + 0.84f * Frand(Seed)), Lo.y + SpanY * (0.08f + 0.84f * Frand(Seed)), Hi.z - 20.0f };
+			const RayHit Down = Raycast(L, Top, Vector3{ 0, 0, -1 }, Hi.z - Lo.z);
+			if (!Down.Hit || Down.Point.z < Lo.z + 50.0f)
+			{
+				continue;
+			}
+			Vector3 Pos = Add(Down.Point, Vector3{ 0, 0, 110.0f });
+			// Every fourth shard floats high up: fly, glide, grapple or pillar to it.
+			if (Shards[Li].size() % 4 == 3)
+			{
+				Pos.z += 500.0f + 400.0f * Frand(Seed);
+			}
+			bool bTooClose = Len(Sub(Pos, L.Start)) < 400.0f;
+			for (const Shard& O : Shards[Li])
+			{
+				bTooClose = bTooClose || Len2D(Sub(O.Pos, Pos)) < MinGap;
+			}
+			if (!bTooClose && !OverlapsSolid(L, Pos, 40.0f, 40.0f))
+			{
+				Shards[Li].push_back(Shard{ Pos, false });
+			}
+		}
+	}
+}
+
+bool Game::NearestShard(Vector3& Out) const
+{
+	float Best = 1e30f;
+	for (const Shard& S : Shards[LevelIndex])
+	{
+		const float D = Len(Sub(S.Pos, P.Pos));
+		if (!S.Taken && D < Best)
+		{
+			Best = D;
+			Out = S.Pos;
+		}
+	}
+	return Best < 1e29f;
+}
+
+void Game::UpdateShards(float Dt)
+{
+	(void)Dt;
+	std::vector<Shard>& List = Shards[LevelIndex];
+	const Vector3 Center = CarIndex >= 0 ? Cars[CarIndex].Pos : P.Pos;
+	const float Reach = (CarIndex >= 0 ? 180.0f : P.R + 70.0f) + 30.0f;
+	for (Shard& S : List)
+	{
+		if (S.Taken || P.RespawnTimer > 0.0f)
+		{
+			continue;
+		}
+		const Vector3 To = Sub(S.Pos, Center);
+		if (Len2D(To) < Reach && To.z < (CarIndex >= 0 ? 200.0f : P.H + 60.0f) && To.z > -(CarIndex >= 0 ? 200.0f : P.H + 60.0f))
+		{
+			S.Taken = true;
+			++ShardsTaken;
+			P.Meter = std::min(100.0f, P.Meter + 10.0f);
+			P.Health = std::min(P.MaxHealth, P.Health + 15.0f);
+			P.Energy = 100.0f;
+			SpawnBurst(S.Pos, Color{ 190, 130, 255, 255 }, 30, 700.0f, 14.0f);
+			SpawnRing(Particles, S.Pos, Vector3{ 0, 0, 1 }, Color{ 120, 230, 255, 255 }, 20, 600.0f, 10.0f);
+			int Left = 0;
+			for (const Shard& O : List) Left += O.Taken ? 0 : 1;
+			const int Total = static_cast<int>(List.size());
+			if (Left == 0)
+			{
+				Banner = "ALL RIFT SHARDS FOUND!";
+				BannerTime = 3.0f;
+			}
+			Say("Rift shard " + std::to_string(Total - Left) + "/" + std::to_string(Total) + " (+health, energy, ultimate)", Color{ 200, 160, 255, 255 }, 2.0f);
 		}
 	}
 }

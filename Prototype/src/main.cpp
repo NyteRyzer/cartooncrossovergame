@@ -164,6 +164,9 @@ namespace
 		In.DebugMeter = IsKeyPressed(KEY_F6);
 		In.DebugNextHero = IsKeyPressed(KEY_F7);
 		In.ToggleArt = IsKeyPressed(KEY_M);
+		In.DownPressed = IsKeyPressed(KEY_LEFT_CONTROL) || IsKeyPressed(KEY_C);
+		In.Dodge = IsKeyPressed(KEY_V) || IsKeyPressed(KEY_LEFT_ALT) || (bCursorLocked && IsMouseButtonPressed(MOUSE_BUTTON_SIDE));
+		In.Emote = IsKeyPressed(KEY_B);
 		return In;
 	}
 
@@ -288,9 +291,69 @@ namespace
 			if (Once(39.5f)) In.ToggleArt = true;
 			if (Once(39.7f)) Check(!G.SpriteArtEnabled(), "M switches back to 3D models");
 
+			// --- Moves: dodge, ground pound, emote, combo, shards (El Tigre) -----
+			if (Once(40.0f)) { G.TravelTo(1); G.ClearEnemies(); G.SelectHero(HeroId::ElTigre); G.SetCameraAngles(G.CurrentLevelData().StartYaw, -12.0f); }
+			if (During(40.2f, 40.5f)) In.MoveY = 1.0f;
+			if (Once(40.25f)) In.Dodge = true;
+			if (Once(40.3f)) { Check(G.IsDodging(), "dodge roll"); Check(G.PlayerSpeed() > 1200.0f, "dodge dashes"); }
+			if (Once(40.9f)) In.Jump = true;
+			if (Once(41.25f)) In.DownPressed = true;
+			if (Once(41.3f)) Check(G.IsPounding(), "ground pound starts in the air");
+			if (Once(42.0f)) Check(G.PoundCount() == 1, "ground pound lands with a shockwave");
+			if (Once(42.2f)) In.Emote = true;
+			if (Once(42.3f)) Check(G.IsEmoting(), "emote plays");
+			if (Once(43.3f)) { G.SetCameraAngles(G.CurrentLevelData().StartYaw + 160.0f, -8.0f); }
+			if (Once(43.45f)) Shot = "18_el_tigre_emote";
+			if (Once(43.7f) || Once(44.0f) || Once(44.3f)) In.Attack = true;
+			if (Once(44.35f)) { Check(G.ComboStep() == 2, "three-hit combo reaches the finisher"); Shot = "19_el_tigre_finisher"; }
+			if (Once(44.7f))
+			{
+				Vector3 Sh{};
+				Check(G.NearestShard(Sh), "rift shards placed in the level");
+				G.TeleportPlayer(Sh, 0.0f);
+			}
+			if (Once(44.9f)) Check(G.ShardsCollected() == 1, "rift shard collected");
+
+			// --- Flight: boost, banking, barrel roll (Danny) --------------------
+			if (Once(45.0f)) { G.SelectHero(HeroId::Danny); const Vector3 Pp = G.PlayerPos(); G.TeleportPlayer(Vector3{ Pp.x, Pp.y, Pp.z + 900.0f }, 0.0f); G.SetCameraAngles(G.CurrentLevelData().StartYaw, -6.0f); }
+			if (Once(45.1f)) In.Traversal = true;
+			if (During(45.2f, 46.7f)) { In.MoveY = 1.0f; In.Boost = true; }
+			if (During(45.9f, 46.6f)) { In.MoveX = 1.0f; In.LookX = 1.5f; }
+			if (Once(45.9f)) { Check(G.IsFlying(), "Danny flying"); Check(G.PlayerSpeed() > 2000.0f, "boosted flight builds speed"); }
+			if (Once(46.4f)) { Check(std::fabs(G.FlightBank()) > 5.0f, "flight banks into turns"); Shot = "20_danny_boost_flight"; }
+			if (Once(46.6f)) In.Dodge = true;
+			if (Once(46.65f)) Check(G.IsDodging(), "barrel roll");
+
+			// --- Aang's glider -----------------------------------------------------
+			if (Once(47.0f)) { G.SelectHero(HeroId::Aang); const Vector3 Pp = G.PlayerPos(); G.TeleportPlayer(Vector3{ Pp.x, Pp.y, Pp.z + 600.0f }, 0.0f); G.SetCameraAngles(G.CurrentLevelData().StartYaw, -20.0f); }
+			if (During(47.1f, 48.4f)) In.JumpHeld = true;
+			if (Once(47.7f)) { Check(G.IsGliding(), "Aang glides"); Check(G.PlayerSpeed() > 800.0f, "glide carries speed"); }
+			if (Once(48.0f)) Shot = "21_aang_glide";
+
+			// --- Wall jump off the Neutron house -----------------------------------
+			if (const Block* B = G.CurrentLevelData().FindBlock("Neutron_House"))
+			{
+				const float Yaw = B->YawDeg * 3.14159265f / 180.0f;
+				const Vector3 Out{ std::cos(Yaw), std::sin(Yaw), 0.0f };
+				if (Once(48.5f))
+				{
+					G.SelectHero(HeroId::Ben);
+					G.TeleportPlayer(Vector3{ B->Center.x + Out.x * (B->Half.x + 45.0f), B->Center.y + Out.y * (B->Half.x + 45.0f), B->Center.z + B->Half.z * 0.3f }, B->YawDeg + 180.0f);
+					G.SetCameraAngles(B->YawDeg + 180.0f, -10.0f);
+				}
+				if (During(48.5f, 48.75f)) In.MoveY = 1.0f;
+				if (Once(48.7f)) In.Jump = true;
+				if (Once(48.9f)) Check(G.WallJumps() == 1, "wall jump");
+			}
+
+			if (In.Jump) JumpHoldUntil = T + 0.3f;
+			if (T < JumpHoldUntil) In.JumpHeld = true;
+
 			if (!G.PlayerIsValid()) { Check(false, "player state is finite"); return false; }
-			return T < 40.0f;
+			return T < 49.2f;
 		}
+
+		float JumpHoldUntil = -1.0f;
 
 		void Check(bool bOk, const char* What)
 		{
@@ -312,7 +375,7 @@ namespace
 		{
 			In = InputState{};
 			Shot.clear();
-			const float Slot = 3.2f;
+			const float Slot = 5.8f;
 			const int Hero = static_cast<int>(T / Slot);
 			if (Hero >= static_cast<int>(HeroId::Count) + 2) return false;
 			const float L = std::fmod(T, Slot), PL = std::fmod(PrevT, Slot);
@@ -330,19 +393,22 @@ namespace
 			// Extra slots: Ben as Heatblast and as Four Arms.
 			if (Hero == static_cast<int>(HeroId::Count) && Once(0.1f)) In.Number = 1;
 			if (Hero == static_cast<int>(HeroId::Count) + 1 && Once(0.1f)) In.Number = 2;
-			// Walk toward the camera so face and cycle both read.
-			if (L > 0.9f && L < 2.0f) In.MoveY = -0.7f;
-			if (Once(2.05f)) In.Jump = true;
-			if (Once(2.6f)) In.Attack = true;
-			if (Once(2.85f)) In.Traversal = true;
-			if (L > 2.85f) In.JumpHeld = true;
+			// Idle, emote, walk toward the camera, dodge, 3-hit combo, then flight
+			// (flyers) or a jump into a ground pound.
+			if (Once(0.6f)) In.Emote = true;
+			if (L > 3.0f && L < 3.9f) In.MoveY = -0.7f;
+			if (Once(3.85f)) In.Dodge = true;
+			if (Once(4.3f) || Once(4.6f) || Once(4.9f)) In.Attack = true;
+			if (Once(5.2f)) { In.Jump = true; In.Traversal = true; }
+			if (L > 5.2f) { In.JumpHeld = true; In.MoveY = -0.5f; }
+			if (Once(5.45f)) In.DownPressed = true;
 			char Buf[64];
-			const float Frames[] = { 0.5f, 1.2f, 1.32f, 1.44f, 1.56f, 1.68f, 2.2f, 2.68f, 3.15f };
-			for (int i = 0; i < 9; ++i)
+			const float Frames[] = { 0.4f, 1.2f, 1.85f, 2.4f, 3.3f, 3.45f, 3.6f, 4.0f, 4.42f, 4.72f, 5.08f, 5.4f, 5.7f };
+			for (int i = 0; i < 13; ++i)
 			{
 				if (Once(Frames[i]))
 				{
-					std::snprintf(Buf, sizeof(Buf), "anim_%02d_%d", Hero, i);
+					std::snprintf(Buf, sizeof(Buf), "anim_%02d_%02d", Hero, i);
 					Shot = Buf;
 				}
 			}

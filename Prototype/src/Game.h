@@ -23,6 +23,9 @@ struct InputState
 	bool Back = false, Help = false, Recall = false, Travel = false;
 	bool DebugSpawn = false, DebugMeter = false, DebugNextHero = false;
 	bool ToggleArt = false;
+	bool DownPressed = false;  // Ctrl/C this frame (ground pound in the air)
+	bool Dodge = false;        // V / Left Alt: dodge roll, air dash, barrel roll
+	bool Emote = false;        // B: hero signature pose
 };
 
 enum class HeroId : int { Jimmy, Timmy, Danny, Jake, XJ9, ElTigre, Ben, Aang, Count };
@@ -204,6 +207,18 @@ public:
 	int KillCount() const { return Kills; }
 	int PillarCount() const { return static_cast<int>(Pillars.size()); }
 	int CourseProgress() const { return Courses.empty() ? -1 : Courses[0].Next; }
+	bool IsDodging() const { return P.DodgeTime > 0.0f; }
+	bool IsPounding() const { return P.Pounding; }
+	int PoundCount() const { return Pounds; }
+	bool IsEmoting() const { return P.EmoteTime > 0.0f; }
+	bool IsFlying() const { return P.Flying; }
+	bool IsGliding() const { return P.Gliding; }
+	float PlayerSpeed() const;
+	float FlightBank() const { return P.FlyBank; }
+	int ComboStep() const { return P.AttackStep; }
+	int ShardsCollected() const { return ShardsTaken; }
+	bool NearestShard(Vector3& Out) const;
+	int WallJumps() const { return WallJumpCount; }
 	const HoverCar* PlayerCar() const { return CarIndex >= 0 ? &Cars[CarIndex] : nullptr; }
 
 private:
@@ -237,6 +252,34 @@ private:
 		int AppliedForm = Omnitrix::NoForm;
 		bool SpriteFlip = false;
 		float LandTimer = 0.0f;
+
+		// Flight feel: visual bank/pitch, boost, barrel rolls, wing flaps.
+		float FlyBank = 0.0f, FlyPitch = 0.0f, FlapPhase = 0.0f;
+		float TakeoffTime = 0.0f, BoostFx = 0.0f;
+		bool WasBoosting = false;
+		float GlideSpeed = 0.0f;
+		// Dodge roll / air dash / barrel roll.
+		float DodgeTime = 0.0f, DodgeCd = 0.0f;
+		Vector3 DodgeDir{};
+		int DodgeSide = 1;
+		bool DodgeAir = false, AirDashUsed = false;
+		// Attack combos: step 0, 1, 2 (finisher).
+		int AttackStep = 0;
+		float AttackDur = 0.25f, LastAttack = -10.0f;
+		int HitCombo = 0;
+		float HitComboTimer = 0.0f;
+		// Jumping: coyote time, buffered jumps, variable height, flips, wall jumps.
+		float Coyote = 0.0f, JumpBuffer = 0.0f;
+		bool JumpCut = false;
+		float FlipTime = 0.0f;
+		float WallTimer = 0.0f, WallSlide = 0.0f;
+		Vector3 WallNormal{};
+		// Ground pound.
+		bool Pounding = false;
+		float PoundLand = 0.0f;
+		// Emotes and idle fidgets.
+		float EmoteTime = 0.0f;
+		float IdleTime = 0.0f;
 	};
 
 	// Setup
@@ -250,6 +293,12 @@ private:
 	void UpdateOmnitrix(float RealDt, const InputState& In);
 	void UpdatePlayer(float Dt, const InputState& In);
 	void UpdateGhost(float Dt, const InputState& In);
+	void UpdateFlight(float Dt, const InputState& In);
+	void UpdateGlide(float Dt, const InputState& In);
+	void UpdateMoves(float Dt, const InputState& In);
+	void UpdateShards(float Dt);
+	void SpawnShards();
+	void RenderShards(ToonRenderer& R);
 	void UpdateCar(HoverCar& Car, float Dt, const InputState* In);
 	void UpdateCombat(float Dt, const InputState& In);
 	void UpdateProjectiles(float Dt);
@@ -329,6 +378,20 @@ private:
 	float BannerTime = 0.0f;
 	int Kills = 0;
 	int RiftsClosed = 0;
+	int Pounds = 0;
+	int WallJumpCount = 0;
+	float CamShake = 0.0f;
+	float HitStop = 0.0f;
+	float CamFov = 70.0f;
+
+	// Rift shards: collectibles scattered over every level (rooftops, ledges, sky).
+	struct Shard
+	{
+		Vector3 Pos{};
+		bool Taken = false;
+	};
+	std::vector<std::vector<Shard>> Shards;   // per level
+	int ShardsTaken = 0;
 
 	// Goddard follows Jimmy around.
 	Vector3 GoddardPos{};

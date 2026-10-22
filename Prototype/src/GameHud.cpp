@@ -149,6 +149,13 @@ void Game::DrawHud(int SW, int SH)
 		Shadowed(Buf, SW - MeasureText(Buf, static_cast<int>(16 * UiScale)) - 16, RY, static_cast<int>(16 * UiScale), Color{ 220, 170, 255, 255 });
 		RY += static_cast<int>(22 * UiScale);
 	}
+	{
+		int Have = 0;
+		for (const Shard& S : Shards[LevelIndex]) Have += S.Taken ? 1 : 0;
+		std::snprintf(Buf, sizeof(Buf), "Rift shards: %d/%d", Have, static_cast<int>(Shards[LevelIndex].size()));
+		Shadowed(Buf, SW - MeasureText(Buf, static_cast<int>(16 * UiScale)) - 16, RY, static_cast<int>(16 * UiScale), Color{ 200, 160, 255, 255 });
+		RY += static_cast<int>(22 * UiScale);
+	}
 	for (const Course& C : Courses)
 	{
 		if (C.Running)
@@ -164,8 +171,35 @@ void Game::DrawHud(int SW, int SH)
 		RY += static_cast<int>(22 * UiScale);
 	}
 
+	// Hit combo counter.
+	if (P.HitCombo >= 2)
+	{
+		std::snprintf(Buf, sizeof(Buf), "%d HIT COMBO!", P.HitCombo);
+		const int CS = static_cast<int>((26 + std::min(P.HitCombo, 20)) * UiScale);
+		const unsigned char Fade = static_cast<unsigned char>(std::clamp(P.HitComboTimer / 0.5f, 0.0f, 1.0f) * 255.0f);
+		Shadowed(Buf, SW / 2 + static_cast<int>(180 * UiScale), SH / 2 - static_cast<int>(120 * UiScale), CS, Color{ 255, 220, 90, Fade });
+	}
+
 	// Terminal labels in the world.
 	const Camera3D Cam = MakeCamera();
+
+	// Marker for the nearest rift shard (within 150 m).
+	Vector3 ShardPos{};
+	if (NearestShard(ShardPos) && TerminalMenu < 0)
+	{
+		const Vector3 ToShard{ ShardPos.x - CamPos.x, ShardPos.y - CamPos.y, ShardPos.z - CamPos.z };
+		const float Dist = std::sqrt(ToShard.x * ToShard.x + ToShard.y * ToShard.y + ToShard.z * ToShard.z);
+		const Vector3 F = CamForward();
+		if (Dist < 15000.0f && (ToShard.x * F.x + ToShard.y * F.y + ToShard.z * F.z) > 0.0f)
+		{
+			const Vector2 Sp = GetWorldToScreen(ToRender(ShardPos), Cam);
+			const float D = 9.0f * UiScale;
+			DrawPoly(Sp, 4, D, 0.0f, Color{ 200, 160, 255, 220 });
+			DrawPolyLines(Sp, 4, D, 0.0f, BLACK);
+			std::snprintf(Buf, sizeof(Buf), "%.0f m", Dist * 0.01f);
+			Shadowed(Buf, static_cast<int>(Sp.x) - MeasureText(Buf, static_cast<int>(14 * UiScale)) / 2, static_cast<int>(Sp.y + D + 4), static_cast<int>(14 * UiScale), Color{ 220, 200, 255, 255 });
+		}
+	}
 	for (const Marker& M : Levels[LevelIndex].Markers)
 	{
 		if (M.Class != "DimensionalTerminal") continue;
@@ -247,8 +281,9 @@ void Game::DrawHud(int SW, int SH)
 	{
 		const char* Lines[] = {
 			"CONTROLS  (F1 to toggle)",
-			"WASD move   Mouse look   Space jump / ascend   Ctrl or C descend   Shift sprint/boost",
-			"LMB attack   Q signature   R Ghost Wail (Danny)   F ultimate   Tab fly (flyers)",
+			"WASD move   Mouse look   Space jump / ascend (jump at walls to wall-jump)   Ctrl or C descend   Shift sprint/boost",
+			"LMB attack (3-hit combos)   Q signature   R Ghost Wail / Earth Pillar   F ultimate   Tab fly (flyers)",
+			"V or Alt dodge roll / air dash / barrel roll   Ctrl in the air: ground pound   B emote   Hold Space falling: glide (Aang)",
 			"E interact: terminals (swap hero / travel), hover car   P return to Nexus",
 			"Ben: 1/2/3 transform, Q dial, G Master Control Glitch, F Way Big (full meter)",
 			"M art style (cut-outs / 3D)   Esc pause/quit   F11 fullscreen   Debug: F5 enemies  F6 meter  F7 next hero",
@@ -256,10 +291,11 @@ void Game::DrawHud(int SW, int SH)
 		const int LH = static_cast<int>(18 * UiScale);
 		int W = 0;
 		for (const char* L : Lines) W = std::max(W, MeasureText(L, LH));
-		const int BoxH = (LH + 6) * 6 + 16;
+		const int NLines = static_cast<int>(sizeof(Lines) / sizeof(Lines[0]));
+		const int BoxH = (LH + 6) * NLines + 16;
 		const int X = (SW - W) / 2 - 16, YY = SH - BoxH - static_cast<int>(150 * UiScale);
 		DrawRectangle(X, YY, W + 32, BoxH, Color{ 0, 0, 0, 160 });
-		for (int i = 0; i < 6; ++i)
+		for (int i = 0; i < NLines; ++i)
 		{
 			DrawText(Lines[i], X + 16, YY + 8 + i * (LH + 6), LH, i == 0 ? Color{ 255, 230, 120, 255 } : WHITE);
 		}
