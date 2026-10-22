@@ -34,7 +34,8 @@ add_executable(MultiverseToons
   src/World.cpp)
 
 target_include_directories(MultiverseToons PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MultiverseToons/Public)
+  ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MultiverseToons/Public
+  ${raylib_SOURCE_DIR}/src/external/glfw/include)
 target_link_libraries(MultiverseToons PRIVATE raylib)
 target_compile_options(MultiverseToons PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
 # Portable binary: no dependency on the build machine's libstdc++.
@@ -45,4 +46,6 @@ set_target_properties(MultiverseToons PROPERTIES BUILD_RPATH "$ORIGIN")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_custom_command(TARGET MultiverseToons POST_BUILD
   COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tools/export_levels.py $<TARGET_FILE_DIR:MultiverseToons>/data/levels
-  COMMENT "Exporting greybox layouts")
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/assets/portraits $<TARGET_FILE_DIR:MultiverseToons>/data/portraits
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/assets/sprites $<TARGET_FILE_DIR:MultiverseToons>/data/sprites
+  COMMENT "Exporting greybox layouts and portraits")

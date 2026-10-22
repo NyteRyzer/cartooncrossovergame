@@ -62,7 +62,7 @@ for f in rcore rshapes rtextures rtext utils rmodels rglfw; do
 done
 for f in main Game GameRender GameHud Render World; do
 	"${ZIGCMD[@]}" c++ "${COMMON[@]}" -std=c++17 -Wall -Wextra -Wno-missing-field-initializers \
-		-I "$RAYLIB_SRC/src" -I "$ROOT/Source/MultiverseToons/Public" \
+		-I "$RAYLIB_SRC/src" -I "$RAYLIB_SRC/src/external/glfw/include" -I "$ROOT/Source/MultiverseToons/Public" \
 		-c "$ROOT/Prototype/src/$f.cpp" -o "$OUT/obj/$f.o" &
 	pids+=($!)
 done
@@ -71,4 +71,7 @@ for p in "${pids[@]}"; do wait "$p"; done
 "${ZIGCMD[@]}" c++ -target "$TARGET" "$OUT"/obj/*.o -o "$OUT/$EXE" "${LIBS[@]}" -s
 rm -f "$OUT"/*.pdb
 python3 -I "$ROOT/Prototype/tools/export_levels.py" "$OUT/data/levels" >/dev/null
+rm -rf "$OUT/data/portraits" "$OUT/data/sprites"
+cp -R "$ROOT/Prototype/assets/portraits" "$OUT/data/portraits"
+cp -R "$ROOT/Prototype/assets/sprites" "$OUT/data/sprites"
 echo "Built $OUT/$EXE ($TARGET)"

@@ -29,7 +29,9 @@ HOW TO PLAY
   game folder. Command-line options: --fullscreen   --size 1280x720
 
 WHAT'S IN THIS BUILD
-  This is a greybox prototype: blocky stand-in art, but real mechanics.
+  This is a greybox prototype: blocky stand-in 3D art (styled after the
+  production-bible concept sheet, whose portraits appear on the hero select
+  screen), but real mechanics.
   It plays the same level layouts and runs the same Omnitrix and hover-car
   rules as the Unreal Engine project in this repository.
 
@@ -47,7 +49,8 @@ WHAT'S IN THIS BUILD
     - Press P to return to the Nexus.
 
   HEROES
-    1 Jimmy Neutron  - laser blaster, Q Goddard jetpack, drives the hover car
+    1 Jimmy Neutron  - shrink-ray blaster, Q Goddard jetpack, drives the hover
+                       car; Goddard follows him around
     2 Timmy Turner   - magic stars, Q anvil drop, Tab fairy cloud flight
     3 Danny Phantom  - ecto blasts, Tab ghost flight, Q intangible (phase
                        through walls), R Ghost Wail
@@ -58,7 +61,7 @@ WHAT'S IN THIS BUILD
                        dial with slow-mo), G Master Control Glitch (Cannonbolt),
                        F with a full meter = Way Big
     8 Aang           - air blast, double jump, hold Space in the air to glide,
-                       Q air scooter
+                       Q air scooter, R earth pillar (launches you up)
     Everyone: F unleashes their ultimate when the meter is full.
 
 CONTROLS

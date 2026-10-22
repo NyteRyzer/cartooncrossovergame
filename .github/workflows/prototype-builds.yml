@@ -60,12 +60,14 @@ jobs:
           lipo -info "$APP/Contents/MacOS/MultiverseToons"
           codesign --verify --deep --strict --verbose=2 "$APP"
           ls "$APP/Contents/Resources/data/levels"
-      - name: Smoke test
-        # CI Macs are VMs; if their virtual GPU can't create a GL context this
-        # step reports it without failing the build.
+      - name: Smoke test (software OpenGL test build)
+        # CI Macs are GPU-less VMs, so the shipped app can't get a hardware GL
+        # context here. Run the same code built to accept Apple's software
+        # renderer instead (test-only; never shipped).
         continue-on-error: true
         run: |
-          "Prototype/build-portable/macos/Multiverse Toons.app/Contents/MacOS/MultiverseToons" --smoke-test --size 1280x720 --shots "$PWD/mac-shots"
+          SOFTWARE_GL_TEST=1 Prototype/tools/build_macos.sh "$PWD/mac-swgl"
+          "mac-swgl/Multiverse Toons.app/Contents/MacOS/MultiverseToons" --smoke-test --size 1280x720 --shots "$PWD/mac-shots"
       - uses: actions/upload-artifact@v4
         with:
           name: package-macos

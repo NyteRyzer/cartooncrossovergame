@@ -31,20 +31,6 @@ namespace
 		return Shape::Cube;
 	}
 
-	void FinalizeBlock(Block& B)
-	{
-		B.Half = Vector3{ B.Size.x * 0.5f, B.Size.y * 0.5f, B.Size.z * 0.5f };
-		B.CosYaw = std::cos(B.YawDeg * Deg2Rad);
-		B.SinYaw = std::sin(B.YawDeg * Deg2Rad);
-		B.BoundRadiusXY = std::sqrt(B.Half.x * B.Half.x + B.Half.y * B.Half.y);
-		const bool Upright = std::fmod(std::fabs(B.PitchDeg), 360.0f) < 0.01f;
-		B.VerticalCylinder = B.Kind == Shape::Cylinder && Upright;
-		// Pitched shapes and cones are decorative (ferris wheel, platform underside).
-		if (!Upright || B.Kind == Shape::Cone || B.Kind == Shape::Plane)
-		{
-			B.Solid = false;
-		}
-	}
 
 	// World -> block-local (yaw only).
 	Vector3 ToLocal(const Block& B, Vector3 P)
@@ -273,6 +259,21 @@ namespace
 	}
 }
 
+void FinalizeBlock(Block& B)
+{
+	B.Half = Vector3{ B.Size.x * 0.5f, B.Size.y * 0.5f, B.Size.z * 0.5f };
+	B.CosYaw = std::cos(B.YawDeg * Deg2Rad);
+	B.SinYaw = std::sin(B.YawDeg * Deg2Rad);
+	B.BoundRadiusXY = std::sqrt(B.Half.x * B.Half.x + B.Half.y * B.Half.y);
+	const bool Upright = std::fmod(std::fabs(B.PitchDeg), 360.0f) < 0.01f;
+	B.VerticalCylinder = B.Kind == Shape::Cylinder && Upright;
+	// Pitched shapes and cones are decorative (ferris wheel, platform underside).
+	if (!Upright || B.Kind == Shape::Cone || B.Kind == Shape::Plane)
+	{
+		B.Solid = false;
+	}
+}
+
 const Block* Level::FindBlock(const std::string& Label) const
 {
 	const int Index = FindBlockIndex(Label);
@@ -382,9 +383,45 @@ bool LoadLevel(const std::string& Path, Level& Out, std::string& Error)
 	return true;
 }
 
+namespace
+{
+	// Height of a block's pyramid roof surface above (X, Y), or -1 outside it.
+	float RoofSurfaceZ(const Block& B, Vector3 P)
+	{
+		const Vector3 Local = ToLocal(B, P);
+		const float Hx = B.Half.x * Block::RoofOverhang, Hy = B.Half.y * Block::RoofOverhang;
+		const float T = std::max(std::fabs(Local.x) / Hx, std::fabs(Local.y) / Hy);
+		if (T >= 1.0f)
+		{
+			return -1.0f;
+		}
+		return B.Center.z + B.Half.z + B.RoofHeight * (1.0f - T);
+	}
+}
+
 CollisionResult ResolveCylinder(const Level& L, Vector3& P, float R, float H, CollisionMode Mode, float StepUp)
 {
 	CollisionResult Result;
+	// Roofs: stand on the slope instead of sinking to the flat box top.
+	for (const Block& B : L.Blocks)
+	{
+		if (B.RoofHeight <= 0.0f || !Blocks(B, Mode))
+		{
+			continue;
+		}
+		const float Feet = P.z - H;
+		const float Top = B.Center.z + B.Half.z;
+		if (Feet < Top - 20.0f || Feet > Top + B.RoofHeight)
+		{
+			continue;
+		}
+		const float Surface = RoofSurfaceZ(B, P);
+		if (Surface > 0.0f && Feet < Surface)
+		{
+			P.z += Surface - Feet;
+			Result.Grounded = true;
+		}
+	}
 	for (int Iter = 0; Iter < 4; ++Iter)
 	{
 		bool Any = false;

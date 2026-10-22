@@ -68,6 +68,64 @@ void main()
 }
 )";
 
+	const char* SpriteVS = R"(#version 330
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec3 vertexNormal;
+uniform mat4 mvp;
+uniform mat4 matModel;
+uniform mat4 matNormal;
+out vec2 fragTexCoord;
+out vec3 fragNormal;
+out vec3 fragWorld;
+void main()
+{
+    fragTexCoord = vertexTexCoord;
+    fragWorld = (matModel * vec4(vertexPosition, 1.0)).xyz;
+    fragNormal = normalize((matNormal * vec4(vertexNormal, 0.0)).xyz);
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+)";
+
+	// The art is already shaded, so sprites are unlit apart from fog and a
+	// white hit-flash. Transparent pixels are discarded so depth (and so the
+	// outline pass) follows the character's silhouette.
+	const char* SpriteFS = R"(#version 330
+in vec2 fragTexCoord;
+in vec3 fragNormal;
+in vec3 fragWorld;
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+uniform float flash;
+uniform vec3 fogColor;
+uniform float fogDensity;
+uniform vec3 viewPos;
+out vec4 finalColor;
+void main()
+{
+    vec4 t = texture(texture0, fragTexCoord);
+    if (t.a < 0.5) discard;
+    vec3 c = mix(t.rgb * colDiffuse.rgb, vec3(1.0), flash);
+    float dist = length(viewPos - fragWorld);
+    float fog = 1.0 - exp(-pow(dist * fogDensity, 2.0));
+    finalColor = vec4(mix(c, fogColor, clamp(fog, 0.0, 1.0)), colDiffuse.a);
+}
+)";
+
+	const char* SpriteNormalFS = R"(#version 330
+in vec2 fragTexCoord;
+in vec3 fragNormal;
+in vec3 fragWorld;
+uniform sampler2D texture0;
+uniform float lineWeight;
+out vec4 finalColor;
+void main()
+{
+    if (texture(texture0, fragTexCoord).a < 0.5) discard;
+    finalColor = vec4(normalize(fragNormal) * 0.5 + 0.5, lineWeight);
+}
+)";
+
 	// Sobel on linear depth (relative) + normals, thickness from per-object weight.
 	const char* OutlineFS = R"(#version 330
 in vec2 fragTexCoord;
@@ -264,6 +322,40 @@ bool ToonRenderer::Init(int Width, int Height)
 	LocNearFar = GetShaderLocation(OutlineShader, "nearFar");
 	LocSkyTop = GetShaderLocation(OutlineShader, "skyTop");
 
+	SpriteShader = LoadShaderFromMemory(SpriteVS, SpriteFS);
+	SpriteNormalShader = LoadShaderFromMemory(SpriteVS, SpriteNormalFS);
+	if (SpriteShader.id == rlGetShaderIdDefault() || SpriteNormalShader.id == rlGetShaderIdDefault())
+	{
+		TraceLog(LOG_ERROR, "Toon: sprite shader compilation failed");
+		return false;
+	}
+	LocSpriteFlash = GetShaderLocation(SpriteShader, "flash");
+	LocSpriteFogColor = GetShaderLocation(SpriteShader, "fogColor");
+	LocSpriteFogDensity = GetShaderLocation(SpriteShader, "fogDensity");
+	LocSpriteViewPos = GetShaderLocation(SpriteShader, "viewPos");
+	LocSpriteLineWeight = GetShaderLocation(SpriteNormalShader, "lineWeight");
+	SpriteMaterial = LoadMaterialDefault();
+	SpriteMaterial.shader = SpriteShader;
+	SpriteNormalMaterial = LoadMaterialDefault();
+	SpriteNormalMaterial.shader = SpriteNormalShader;
+
+	// Unit quad, feet at the origin: x -0.5..0.5, y 0..1, facing +Z.
+	SpriteQuad = Mesh{};
+	SpriteQuad.vertexCount = 4;
+	SpriteQuad.triangleCount = 2;
+	SpriteQuad.vertices = static_cast<float*>(MemAlloc(4 * 3 * sizeof(float)));
+	SpriteQuad.texcoords = static_cast<float*>(MemAlloc(4 * 2 * sizeof(float)));
+	SpriteQuad.normals = static_cast<float*>(MemAlloc(4 * 3 * sizeof(float)));
+	SpriteQuad.indices = static_cast<unsigned short*>(MemAlloc(6 * sizeof(unsigned short)));
+	const float V[12] = { -0.5f, 0, 0, 0.5f, 0, 0, 0.5f, 1, 0, -0.5f, 1, 0 };
+	const float T[8] = { 0, 1, 1, 1, 1, 0, 0, 0 };
+	const unsigned short I[6] = { 0, 1, 2, 0, 2, 3 };
+	for (int i = 0; i < 12; ++i) SpriteQuad.vertices[i] = V[i];
+	for (int i = 0; i < 8; ++i) SpriteQuad.texcoords[i] = T[i];
+	for (int i = 0; i < 4; ++i) { SpriteQuad.normals[i * 3] = 0; SpriteQuad.normals[i * 3 + 1] = 0; SpriteQuad.normals[i * 3 + 2] = 1; }
+	for (int i = 0; i < 6; ++i) SpriteQuad.indices[i] = I[i];
+	UploadMesh(&SpriteQuad, false);
+
 	CelMaterial = LoadMaterialDefault();
 	CelMaterial.shader = CelShader;
 	NormalMaterial = LoadMaterialDefault();
@@ -300,6 +392,9 @@ void ToonRenderer::Shutdown()
 	{
 		UnloadMesh(M);
 	}
+	UnloadMesh(SpriteQuad);
+	UnloadShader(SpriteShader);
+	UnloadShader(SpriteNormalShader);
 	UnloadShader(CelShader);
 	UnloadShader(NormalShader);
 	UnloadShader(OutlineShader);
@@ -325,6 +420,9 @@ void ToonRenderer::BeginPass(RenderPass InPass, const Camera3D& Cam, const Scene
 		SetShaderValue(CelShader, LocFogDensity, &Light.FogDensity, SHADER_UNIFORM_FLOAT);
 		SetShaderValue(CelShader, LocBands, &Light.Bands, SHADER_UNIFORM_FLOAT);
 		SetShaderValue(CelShader, LocViewPos, &Cam.position, SHADER_UNIFORM_VEC3);
+		SetShaderValue(SpriteShader, LocSpriteFogColor, &Fog, SHADER_UNIFORM_VEC3);
+		SetShaderValue(SpriteShader, LocSpriteFogDensity, &Light.FogDensity, SHADER_UNIFORM_FLOAT);
+		SetShaderValue(SpriteShader, LocSpriteViewPos, &Cam.position, SHADER_UNIFORM_VEC3);
 	}
 	else
 	{
@@ -366,6 +464,45 @@ void ToonRenderer::Draw(MeshKind Kind, const Matrix& Transform, Color Tint, floa
 		SetShaderValue(NormalShader, LocLineWeight, &Weight, SHADER_UNIFORM_FLOAT);
 		DrawMesh(M, NormalMaterial, Transform);
 	}
+}
+
+void ToonRenderer::DrawSprite(const Texture2D& Tex, Vector3 Feet, Vector3 Right, Vector3 ToCamera, float Width, float Height,
+                              float Roll, bool bFlip, Color Tint, float Flash, float LineWeight)
+{
+	if (Tex.id == 0)
+	{
+		return;
+	}
+	const Vector3 Up{ 0.0f, 1.0f, 0.0f };
+	const float C = std::cos(Roll), S = std::sin(Roll);
+	// Lean: rotate the right/up axes about the view direction.
+	Vector3 X = Vector3Add(Vector3Scale(Right, C), Vector3Scale(Up, S));
+	Vector3 Y = Vector3Add(Vector3Scale(Right, -S), Vector3Scale(Up, C));
+	X = Vector3Scale(X, Width * (bFlip ? -1.0f : 1.0f));
+	Y = Vector3Scale(Y, Height);
+	Matrix M{};
+	M.m0 = X.x; M.m1 = X.y; M.m2 = X.z;
+	M.m4 = Y.x; M.m5 = Y.y; M.m6 = Y.z;
+	M.m8 = ToCamera.x; M.m9 = ToCamera.y; M.m10 = ToCamera.z;
+	M.m12 = Feet.x; M.m13 = Feet.y; M.m14 = Feet.z;
+	M.m15 = 1.0f;
+
+	rlDisableBackfaceCulling();
+	if (Pass == RenderPass::Color)
+	{
+		SetShaderValue(SpriteShader, LocSpriteFlash, &Flash, SHADER_UNIFORM_FLOAT);
+		SpriteMaterial.maps[MATERIAL_MAP_DIFFUSE].texture = Tex;
+		SpriteMaterial.maps[MATERIAL_MAP_DIFFUSE].color = Tint;
+		DrawMesh(SpriteQuad, SpriteMaterial, M);
+	}
+	else if (Tint.a == 255)
+	{
+		const float Weight = std::max(LineWeight, 0.05f) * 0.25f;
+		SetShaderValue(SpriteNormalShader, LocSpriteLineWeight, &Weight, SHADER_UNIFORM_FLOAT);
+		SpriteNormalMaterial.maps[MATERIAL_MAP_DIFFUSE].texture = Tex;
+		DrawMesh(SpriteQuad, SpriteNormalMaterial, M);
+	}
+	rlEnableBackfaceCulling();
 }
 
 void ToonRenderer::Composite(const SceneLighting& Light)

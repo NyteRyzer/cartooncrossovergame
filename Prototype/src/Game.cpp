@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace
 {
@@ -76,8 +77,8 @@ namespace
 		  { 250, 210, 180, 255 }, { 240, 240, 240, 255 }, { 60, 140, 70, 255 }, { 120, 75, 40, 255 }, { 90, 255, 90, 255 },
 		  650.0f, 900.0f, false, 0.0f, 0.0f, 0, false, 2.0f,
 		  { AttackKind::Melee, 10.0f, 0.4f, 0.0f, 170.0f, 0.0f, 250.0f, 1, { 255, 255, 255, 255 }, "Punch" } },
-		{ HeroId::Aang, "Aang", "Eastern Air Temple", "Double Jump + Glider (hold Space) + Air Scooter (Q)", "Air Scooter", "The Avatar State",
-		  { 245, 205, 165, 255 }, { 240, 190, 60, 255 }, { 230, 110, 40, 255 }, { 245, 205, 165, 255 }, { 80, 180, 255, 255 },
+		{ HeroId::Aang, "Aang", "Eastern Air Temple", "Glider (hold Space), Air Scooter (Q), Earth Pillar (R)", "Air Scooter", "The Avatar State",
+		  { 245, 205, 165, 255 }, { 240, 190, 60, 255 }, { 238, 185, 75, 255 }, { 245, 205, 165, 255 }, { 80, 180, 255, 255 },
 		  700.0f, 950.0f, false, 0.0f, 0.0f, 1, true, 1.0f,
 		  { AttackKind::Projectile, 14.0f, 0.28f, 5000.0f, 0.0f, 55.0f, 1500.0f, 1, { 230, 245, 255, 255 }, "Air Blast" } },
 	};
@@ -144,6 +145,15 @@ bool Game::Init(const std::string& DataDir, std::string& Error)
 		{
 			return false;
 		}
+		// Pitched roofs on houses (drawn and walkable).
+		for (Block& B : L.Blocks)
+		{
+			const std::string& N = B.Label;
+			if (N.rfind("Suburb", 0) == 0 || N == "Neutron_House" || N.rfind("CandyBar", 0) == 0)
+			{
+				B.RoofHeight = std::min(B.Size.x, B.Size.y) * 0.45f;
+			}
+		}
 		Levels.push_back(std::move(L));
 	}
 
@@ -158,12 +168,54 @@ bool Game::Init(const std::string& DataDir, std::string& Error)
 		                         std::sin(Pitch * Deg2Rad) * D });
 	}
 
+	const char* PortraitFiles[] = { "jimmy", "timmy", "danny", "jake", "xj9", "eltigre", "ben", "aang" };
+	for (int i = 0; i < static_cast<int>(HeroId::Count); ++i)
+	{
+		const std::string Path = DataDir + "/portraits/" + PortraitFiles[i] + ".png";
+		if (FileExists(Path.c_str()))
+		{
+			Portraits[i] = LoadTexture(Path.c_str());
+			SetTextureFilter(Portraits[i], TEXTURE_FILTER_BILINEAR);
+		}
+	}
+
+	// name, height in cm for the default-size character (art includes hair/hats)
+	const struct { const char* Name; float Height; } SpriteFiles[SprCount] = {
+		{ "jimmy", 168.0f }, { "timmy", 162.0f }, { "danny", 172.0f }, { "jake", 152.0f },
+		{ "xj9", 162.0f }, { "eltigre", 132.0f }, { "ben", 150.0f }, { "aang", 150.0f },
+		{ "heatblast", 182.0f }, { "fourarms", 245.0f }, { "dragon", 300.0f }, { "fairies", 58.0f },
+	};
+	for (int i = 0; i < SprCount; ++i)
+	{
+		const std::string Path = DataDir + "/sprites/" + SpriteFiles[i].Name + ".png";
+		Sprites[i].HeightCm = SpriteFiles[i].Height;
+		if (FileExists(Path.c_str()))
+		{
+			Sprites[i].Tex = LoadTexture(Path.c_str());
+			SetTextureFilter(Sprites[i].Tex, TEXTURE_FILTER_BILINEAR);
+		}
+	}
+
 	P.Omni = Omnitrix::FStateMachine(OmnitrixConfig());
 	LevelIndex = 0;
 	LoadLevelState();
 	ResetPlayer();
 	Say("Welcome to the Nexus Observatory! Walk up to a terminal and press E.", Color{ 180, 255, 200, 255 }, 6.0f);
 	return true;
+}
+
+void Game::Shutdown()
+{
+	for (Texture2D& T : Portraits)
+	{
+		if (T.id != 0) UnloadTexture(T);
+		T = Texture2D{};
+	}
+	for (SpriteArt& S : Sprites)
+	{
+		if (S.Tex.id != 0) UnloadTexture(S.Tex);
+		S.Tex = Texture2D{};
+	}
 }
 
 Omnitrix::FConfig Game::OmnitrixConfig() const
@@ -186,6 +238,12 @@ void Game::LoadLevelState()
 	Anvils.clear();
 	Rifts.clear();
 	Courses.clear();
+	for (Level& Lv : Levels)
+	{
+		Lv.Blocks.erase(std::remove_if(Lv.Blocks.begin(), Lv.Blocks.end(),
+			[](const Block& B) { return B.Label.rfind("EarthPillar_", 0) == 0; }), Lv.Blocks.end());
+	}
+	Pillars.clear();
 	TerminalMenu = -1;
 
 	for (const Marker& M : L.Markers)
@@ -259,6 +317,7 @@ void Game::ResetPlayer()
 	P.RespawnTimer = 0.0f;
 	CamYaw = L.StartYaw;
 	CamPitch = -12.0f;
+	GoddardPos = Sub(P.Pos, Vector3{ 0, 0, P.H });
 	if (P.Hero == HeroId::Ben)
 	{
 		P.Omni = Omnitrix::FStateMachine(OmnitrixConfig());
@@ -475,6 +534,11 @@ void Game::Update(float Dt, const InputState& RawIn)
 			P.Meter = 100.0f;
 			Say("[debug] Ultimate meter filled", Color{ 220, 150, 255, 255 });
 		}
+		if (In.ToggleArt)
+		{
+			bSpriteArt = !bSpriteArt;
+			Say(bSpriteArt ? "Art style: concept-art cut-outs" : "Art style: 3D blockout models", Color{ 200, 220, 255, 255 }, 2.0f);
+		}
 		if (In.DebugNextHero)
 		{
 			SelectHero(static_cast<HeroId>((static_cast<int>(P.Hero) + 1) % static_cast<int>(HeroId::Count)));
@@ -527,6 +591,8 @@ void Game::UpdateWorld(float Dt, const InputState& In)
 		}
 	}
 
+	UpdateGoddard(WorldDt);
+	UpdatePillars(WorldDt);
 	UpdateProjectiles(WorldDt);
 	UpdateEnemies(WorldDt);
 	UpdateRifts(WorldDt);
@@ -803,6 +869,15 @@ void Game::UpdatePlayer(float Dt, const InputState& In)
 	const CollisionResult C = ResolveCylinder(L, P.Pos, P.R, P.H, Mode, std::max(40.0f, P.H * 0.4f));
 	const bool WasGrounded = P.Grounded;
 	P.Grounded = C.Grounded;
+	if (C.Grounded && !WasGrounded && P.Vel.z < -300.0f)
+	{
+		P.LandTimer = 0.18f;
+	}
+	P.LandTimer = std::max(0.0f, P.LandTimer - Dt);
+	// Sprite facing: flip when moving left on screen.
+	const float ScreenRight = P.Vel.x * -std::sin(CamYaw * Deg2Rad) + P.Vel.y * std::cos(CamYaw * Deg2Rad);
+	if (ScreenRight < -80.0f) P.SpriteFlip = true;
+	else if (ScreenRight > 80.0f) P.SpriteFlip = false;
 	if (C.Grounded && P.Vel.z < 0.0f)
 	{
 		if (!WasGrounded && P.Vel.z < -1400.0f && P.H > 300.0f)
@@ -1201,6 +1276,31 @@ void Game::UpdateCombat(float Dt, const InputState& In)
 				P.SigCd = 1.0f;
 				Say("Air Scooter!", Color{ 200, 230, 255, 255 }, 1.0f);
 			}
+			if (In.Sig2 && P.Sig2Cd <= 0.0f && P.Grounded)
+			{
+				// Earthbending: raise a rock pillar under Aang and ride it up.
+				const RayHit Down = Raycast(Levels[LevelIndex], P.Pos, Vector3{ 0, 0, -1 }, P.H + 200.0f);
+				const float Ground = Down.Hit ? Down.Point.z : P.Pos.z - P.H;
+				EarthPillar E;
+				E.Label = "EarthPillar_" + std::to_string(PillarSerial++);
+				E.GroundZ = Ground;
+				E.Base = Vector3{ P.Pos.x, P.Pos.y, Ground };
+				E.Yaw = P.Yaw;
+				Pillars.push_back(E);
+				Block B;
+				B.Label = E.Label;
+				B.Folder = "Abilities";
+				B.Center = Vector3{ P.Pos.x, P.Pos.y, Ground - 5.0f };
+				B.Size = Vector3{ 170.0f, 170.0f, 10.0f };
+				B.YawDeg = P.Yaw;
+				B.RoofHeight = 60.0f;
+				FinalizeBlock(B);
+				Levels[LevelIndex].Blocks.push_back(B);
+				P.Vel.z = 1700.0f;
+				P.Sig2Cd = 2.0f;
+				SpawnBurst(E.Base, Color{ 150, 115, 80, 255 }, 30, 600.0f, 18.0f, -1200.0f);
+				Say("Earthbending: rock pillar!", Color{ 200, 170, 120, 255 }, 1.0f);
+			}
 			break;
 		case HeroId::Danny:
 			if (In.Sig2 && P.Sig2Cd <= 0.0f && P.Energy >= 30.0f && !P.Intangible)
@@ -1466,7 +1566,7 @@ void Game::UpdateEnemies(float Dt)
 		const float Reach = (CarIndex >= 0 ? 0.0f : P.R) + 70.0f;
 		if (CarIndex < 0 && Len(Sub(P.Pos, E.Pos)) < Reach + P.H * 0.5f && E.AttackCd <= 0.0f)
 		{
-			DamagePlayer(9.0f);
+			DamagePlayer(6.0f);
 			E.AttackCd = 0.8f;
 		}
 		if (E.Pos.z < L.BoundsMin.z + 100.0f)
@@ -1591,6 +1691,70 @@ void Game::UpdateEffects(float Dt)
 			}
 			SpawnBurst(A.Pos, Color{ 255, 230, 120, 255 }, 30, 700.0f, 16.0f, -800.0f);
 			Anvils.erase(Anvils.begin() + a);
+		}
+	}
+}
+
+void Game::UpdateGoddard(float Dt)
+{
+	if (P.Hero != HeroId::Jimmy || Dt <= 0.0f)
+	{
+		return;
+	}
+	const Vector3 Feet = Sub(P.Pos, Vector3{ 0, 0, P.H });
+	if (CarIndex >= 0 || Len(Sub(GoddardPos, Feet)) > 2500.0f)
+	{
+		GoddardPos = Feet; // rides along / catches up
+		return;
+	}
+	// Trot alongside Jimmy, a little ahead on his left (keeps him in view).
+	const Vector3 Side = YawDir(P.Yaw - 65.0f);
+	Vector3 Target = Add(Feet, Mul(Side, 120.0f));
+	Vector3 To = Sub(Target, GoddardPos);
+	To.z = 0.0f;
+	const float D = Len(To);
+	const float Speed = std::min(D * 4.0f, 1400.0f);
+	GoddardSpeed = D > 20.0f ? Speed : 0.0f;
+	if (D > 1.0f)
+	{
+		GoddardPos = Add(GoddardPos, Mul(To, std::min(1.0f, Speed * Dt / D)));
+		GoddardYaw += AngleDelta(GoddardYaw, YawOf(To)) * std::min(1.0f, Dt * 8.0f);
+	}
+	else
+	{
+		GoddardYaw += AngleDelta(GoddardYaw, P.Yaw) * std::min(1.0f, Dt * 4.0f);
+	}
+	const RayHit Down = Raycast(Levels[LevelIndex], Add(GoddardPos, Vector3{ 0, 0, 300.0f }), Vector3{ 0, 0, -1 }, 900.0f);
+	const float GroundZ = Down.Hit ? Down.Point.z : Feet.z;
+	GoddardPos.z += (GroundZ - GoddardPos.z) * std::min(1.0f, Dt * 10.0f);
+}
+
+void Game::UpdatePillars(float Dt)
+{
+	Level& L = Levels[LevelIndex];
+	for (int i = static_cast<int>(Pillars.size()) - 1; i >= 0; --i)
+	{
+		EarthPillar& E = Pillars[i];
+		E.Age += Dt;
+		const float Life = 8.0f, Rise = 0.25f, Sink = 0.6f, MaxH = 650.0f;
+		float T = std::min(1.0f, E.Age / Rise);
+		if (E.Age > Life - Sink) T = std::max(0.0f, (Life - E.Age) / Sink);
+		const float Height = std::max(10.0f, MaxH * T);
+		for (Block& B : L.Blocks)
+		{
+			if (B.Label == E.Label)
+			{
+				B.Size.z = Height;
+				B.Center.z = E.GroundZ + Height * 0.5f - 5.0f;
+				FinalizeBlock(B);
+			}
+		}
+		if (E.Age >= Life)
+		{
+			// Pillars are appended after the level's own blocks, so erasing them
+			// never shifts the course gate indices.
+			L.Blocks.erase(std::remove_if(L.Blocks.begin(), L.Blocks.end(), [&](const Block& B) { return B.Label == E.Label; }), L.Blocks.end());
+			Pillars.erase(Pillars.begin() + i);
 		}
 	}
 }

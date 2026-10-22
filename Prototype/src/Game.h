@@ -22,6 +22,7 @@ struct InputState
 	int Number = 0;       // 1-9 pressed this frame
 	bool Back = false, Help = false, Recall = false, Travel = false;
 	bool DebugSpawn = false, DebugMeter = false, DebugNextHero = false;
+	bool ToggleArt = false;
 };
 
 enum class HeroId : int { Jimmy, Timmy, Danny, Jake, XJ9, ElTigre, Ben, Aang, Count };
@@ -166,6 +167,8 @@ class Game
 {
 public:
 	bool Init(const std::string& DataDir, std::string& Error);
+	void Shutdown();
+	const Texture2D& Portrait(HeroId Id) const { return Portraits[static_cast<int>(Id)]; }
 	void Update(float Dt, const InputState& In);
 	void Render(ToonRenderer& R);
 	void DrawHud(int ScreenW, int ScreenH);
@@ -173,6 +176,8 @@ public:
 	Camera3D MakeCamera() const;
 
 	bool IsTerminalOpen() const { return TerminalMenu >= 0; }
+	bool SpriteArtEnabled() const { return bSpriteArt; }
+	bool HasSprite(HeroId Id) const { return Sprites[static_cast<int>(Id)].Tex.id != 0; }
 	bool IsPaused() const { return bPaused; }
 	void SetPaused(bool bInPaused) { bPaused = bInPaused; }
 	bool WantsQuit() const { return bQuit; }
@@ -188,6 +193,7 @@ public:
 	void ExitCar();
 	void FillMeter() { P.Meter = 100.0f; }
 	void SpawnEnemiesNearPlayer(int Count);
+	void ClearEnemies() { Enemies.clear(); P.Health = P.MaxHealth; }
 	void SetCameraAngles(float Yaw, float Pitch) { CamYaw = Yaw; CamPitch = Pitch; }
 	Vector3 PlayerPos() const { return P.Pos; }
 	const Level& CurrentLevelData() const { return Levels[LevelIndex]; }
@@ -196,6 +202,7 @@ public:
 	Omnitrix::EState OmnitrixState() const { return P.Omni.GetState(); }
 	int EnemyCount() const { return static_cast<int>(Enemies.size()); }
 	int KillCount() const { return Kills; }
+	int PillarCount() const { return static_cast<int>(Pillars.size()); }
 	int CourseProgress() const { return Courses.empty() ? -1 : Courses[0].Next; }
 	const HoverCar* PlayerCar() const { return CarIndex >= 0 ? &Cars[CarIndex] : nullptr; }
 
@@ -228,6 +235,8 @@ private:
 		float RespawnTimer = 0.0f;
 		Omnitrix::FStateMachine Omni;
 		int AppliedForm = Omnitrix::NoForm;
+		bool SpriteFlip = false;
+		float LandTimer = 0.0f;
 	};
 
 	// Setup
@@ -282,6 +291,10 @@ private:
 	void RenderCar(ToonRenderer& R, const HoverCar& Car);
 	void RenderTerminal(ToonRenderer& R, const Marker& M, int Index);
 	void RenderShadow(ToonRenderer& R, Vector3 Pos, float Radius);
+	void RenderGoddard(ToonRenderer& R);
+	bool RenderHeroSprite(ToonRenderer& R, unsigned char Alpha, bool bHurt);
+	void UpdateGoddard(float Dt);
+	void UpdatePillars(float Dt);
 
 	std::vector<Level> Levels;
 	int LevelIndex = 0;
@@ -313,4 +326,35 @@ private:
 	float BannerTime = 0.0f;
 	int Kills = 0;
 	int RiftsClosed = 0;
+
+	// Goddard follows Jimmy around.
+	Vector3 GoddardPos{};
+	float GoddardYaw = 0.0f;
+	float GoddardSpeed = 0.0f;
+
+	// Aang's earth pillars live in the level as temporary solid blocks.
+	struct EarthPillar
+	{
+		std::string Label;
+		float Age = 0.0f;
+		float GroundZ = 0.0f;
+		Vector3 Base{};
+		float Yaw = 0.0f;
+	};
+	std::vector<EarthPillar> Pillars;
+	int PillarSerial = 0;
+
+	// Hero portraits cut from the production-bible concept sheet.
+	Texture2D Portraits[static_cast<int>(HeroId::Count)]{};
+
+	// Full-body cut-outs from the same sheet (tools/make_sprites.py), drawn as
+	// camera-facing "paper doll" sprites. Indices 0-7 follow HeroId.
+	enum SpriteId { SprHeatblast = static_cast<int>(HeroId::Count), SprFourArms, SprDragon, SprFairies, SprCount };
+	struct SpriteArt
+	{
+		Texture2D Tex{};
+		float HeightCm = 150.0f;
+	};
+	SpriteArt Sprites[SprCount];
+	bool bSpriteArt = true;
 };

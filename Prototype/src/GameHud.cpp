@@ -29,6 +29,24 @@ namespace
 	{
 		Shadowed(Text, CX - MeasureText(Text, Size) / 2, Y, Size, C);
 	}
+
+	// Portrait card with a coloured frame; falls back to a flat swatch if the
+	// image wasn't found.
+	void PortraitCard(const Texture2D& T, int X, int Y, int Size, Color Frame, bool bSelected)
+	{
+		DrawRectangle(X - 3, Y - 3, Size + 6, Size + 6, bSelected ? Frame : Color{ 0, 0, 0, 200 });
+		if (T.id != 0)
+		{
+			DrawTexturePro(T, Rectangle{ 0, 0, static_cast<float>(T.width), static_cast<float>(T.height) },
+			               Rectangle{ static_cast<float>(X), static_cast<float>(Y), static_cast<float>(Size), static_cast<float>(Size) },
+			               Vector2{ 0, 0 }, 0.0f, WHITE);
+		}
+		else
+		{
+			DrawRectangle(X, Y, Size, Size, Frame);
+		}
+		DrawRectangleLines(X - 3, Y - 3, Size + 6, Size + 6, Frame);
+	}
 }
 
 void Game::DrawHud(int SW, int SH)
@@ -45,25 +63,28 @@ void Game::DrawHud(int SW, int SH)
 		DrawPixel(SW / 2, SH / 2, WHITE);
 	}
 
-	// Hero panel.
+	// Hero panel: portrait, name, bars.
+	const int PS = static_cast<int>(92 * UiScale);
+	PortraitCard(Portrait(P.Hero), 19, 19, PS, H.Accent, true);
+	const int PX = 19 + PS + 16;
 	int Y = 16;
-	Shadowed(H.Name, 16, Y, static_cast<int>(28 * UiScale), H.Accent);
+	Shadowed(H.Name, PX, Y, static_cast<int>(28 * UiScale), H.Accent);
 	Y += static_cast<int>(30 * UiScale);
 	std::snprintf(Buf, sizeof(Buf), "%s  |  %s", H.Universe, H.TraversalName);
-	Shadowed(Buf, 16, Y, static_cast<int>(16 * UiScale), Color{ 230, 230, 240, 255 });
+	Shadowed(Buf, PX, Y, static_cast<int>(16 * UiScale), Color{ 230, 230, 240, 255 });
 	Y += static_cast<int>(24 * UiScale);
 	const int BW = static_cast<int>(260 * UiScale), BH = static_cast<int>(18 * UiScale);
 	std::snprintf(Buf, sizeof(Buf), "HP %d", static_cast<int>(std::ceil(P.Health)));
-	Bar(16, Y, BW, BH, P.Health / P.MaxHealth, Color{ 230, 70, 80, 255 }, Buf);
+	Bar(PX, Y, BW, BH, P.Health / P.MaxHealth, Color{ 230, 70, 80, 255 }, Buf);
 	Y += BH + 8;
 	std::snprintf(Buf, sizeof(Buf), "ULTIMATE %d%%%s", static_cast<int>(P.Meter), P.Meter >= 100.0f ? "  [F]" : "");
-	Bar(16, Y, BW, BH, P.Meter / 100.0f, P.Meter >= 100.0f ? Color{ 255, 220, 60, 255 } : Color{ 120, 140, 255, 255 }, Buf);
+	Bar(PX, Y, BW, BH, P.Meter / 100.0f, P.Meter >= 100.0f ? Color{ 255, 220, 60, 255 } : Color{ 120, 140, 255, 255 }, Buf);
 	Y += BH + 8;
 	if (P.Hero == HeroId::Danny || P.Hero == HeroId::Jimmy || P.Hero == HeroId::Jake)
 	{
 		const char* Name = P.Hero == HeroId::Danny ? "ECTO ENERGY" : (P.Hero == HeroId::Jimmy ? "JETPACK FUEL" : "FIRE BREATH");
 		std::snprintf(Buf, sizeof(Buf), "%s%s", Name, P.Intangible ? (P.WantsIntangible ? "  - INTANGIBLE" : "  - WAITING TO SOLIDIFY") : "");
-		Bar(16, Y, BW, BH, P.Energy / 100.0f, Color{ 90, 230, 130, 255 }, Buf);
+		Bar(PX, Y, BW, BH, P.Energy / 100.0f, Color{ 90, 230, 130, 255 }, Buf);
 		Y += BH + 8;
 	}
 
@@ -73,22 +94,22 @@ void Game::DrawHud(int SW, int SH)
 		const Omnitrix::FStateMachine& M = P.Omni;
 		const FormDef* Form = GetFormDef(M.GetActiveForm());
 		std::snprintf(Buf, sizeof(Buf), "OMNITRIX: %s%s%s", OmnitrixStateName(M.GetState()), Form ? " - " : "", Form ? Form->Name : "");
-		Shadowed(Buf, 16, Y, static_cast<int>(18 * UiScale), Color{ 110, 255, 110, 255 });
+		Shadowed(Buf, PX, Y, static_cast<int>(18 * UiScale), Color{ 110, 255, 110, 255 });
 		Y += static_cast<int>(24 * UiScale);
 		if (M.GetState() == Omnitrix::EState::Alien || M.GetState() == Omnitrix::EState::Selecting)
 		{
 			std::snprintf(Buf, sizeof(Buf), "ALIEN TIME %.0fs", M.GetAlienTimeRemaining());
-			Bar(16, Y, BW, BH, M.GetAlienTimeRemaining() / M.GetConfig().AlienDuration, Color{ 90, 230, 90, 255 }, Buf);
+			Bar(PX, Y, BW, BH, M.GetAlienTimeRemaining() / M.GetConfig().AlienDuration, Color{ 90, 230, 90, 255 }, Buf);
 			Y += BH + 8;
 		}
 		if (M.GetState() == Omnitrix::EState::Recharging || M.GetState() == Omnitrix::EState::Glitched || M.GetState() == Omnitrix::EState::Overclocked)
 		{
 			std::snprintf(Buf, sizeof(Buf), "%s %.1fs", OmnitrixStateName(M.GetState()), M.GetStateTimeRemaining());
-			Bar(16, Y, BW, BH, 1.0f, M.GetState() == Omnitrix::EState::Recharging ? Color{ 220, 60, 60, 255 } : Color{ 255, 210, 60, 255 }, Buf);
+			Bar(PX, Y, BW, BH, 1.0f, M.GetState() == Omnitrix::EState::Recharging ? Color{ 220, 60, 60, 255 } : Color{ 255, 210, 60, 255 }, Buf);
 			Y += BH + 8;
 		}
 		std::snprintf(Buf, sizeof(Buf), "1 Heatblast  2 Four Arms  3 XLR8   G Glitch%s", M.GetGlitchCooldownRemaining() > 0.0f ? " (cooldown)" : "");
-		Shadowed(Buf, 16, Y, static_cast<int>(15 * UiScale), Color{ 200, 255, 200, 255 });
+		Shadowed(Buf, PX, Y, static_cast<int>(15 * UiScale), Color{ 200, 255, 200, 255 });
 		Y += static_cast<int>(20 * UiScale);
 
 		if (M.GetState() == Omnitrix::EState::Selecting)
@@ -184,31 +205,41 @@ void Game::DrawHud(int SW, int SH)
 		DrawRectangleLinesEx(Rectangle{ 0, 0, static_cast<float>(SW), static_cast<float>(SH) }, 12, Color{ 255, 40, 40, static_cast<unsigned char>(P.HurtFlash * 500) });
 	}
 
-	// Terminal menu.
+	// Terminal menu: hero cards built from the concept-sheet portraits.
 	if (TerminalMenu >= 0)
 	{
 		const Marker& M = Levels[LevelIndex].Markers[TerminalMenu];
-		const int W = static_cast<int>(620 * UiScale), Hh = static_cast<int>(470 * UiScale);
+		const int Card = static_cast<int>(124 * UiScale);
+		const int Gap = static_cast<int>(26 * UiScale);
+		const int Cols = 4;
+		const int W = Cols * Card + (Cols + 1) * Gap;
+		const int Hh = static_cast<int>(2 * (Card + 46 * UiScale) + 190 * UiScale);
 		const int X = (SW - W) / 2, YY = (SH - Hh) / 2;
-		DrawRectangle(X, YY, W, Hh, Color{ 15, 10, 40, 230 });
+		DrawRectangle(X, YY, W, Hh, Color{ 15, 10, 40, 235 });
 		DrawRectangleLinesEx(Rectangle{ static_cast<float>(X), static_cast<float>(YY), static_cast<float>(W), static_cast<float>(Hh) }, 3, Color{ 150, 120, 255, 255 });
 		std::snprintf(Buf, sizeof(Buf), "DIMENSIONAL TERMINAL - %s", M.Label.substr(9).c_str());
-		Centered(Buf, SW / 2, YY + 16, static_cast<int>(26 * UiScale), Color{ 200, 180, 255, 255 });
-		int LY = YY + static_cast<int>(60 * UiScale);
+		Centered(Buf, SW / 2, YY + 14, static_cast<int>(26 * UiScale), Color{ 200, 180, 255, 255 });
+		Centered("Choose your hero: press 1-8", SW / 2, YY + static_cast<int>(46 * UiScale), static_cast<int>(16 * UiScale), Color{ 210, 210, 230, 255 });
+		const int GridY = YY + static_cast<int>(78 * UiScale);
 		for (int i = 0; i < static_cast<int>(HeroId::Count); ++i)
 		{
 			const HeroDef& D = GetHeroDef(static_cast<HeroId>(i));
-			std::snprintf(Buf, sizeof(Buf), "%d  %-16s %s", i + 1, D.Name, D.Universe);
-			DrawRectangle(X + 24, LY + 3, 14, 14, D.Accent);
-			Shadowed(Buf, X + 48, LY, Fs, i == static_cast<int>(P.Hero) ? D.Accent : WHITE);
-			LY += Fs + static_cast<int>(10 * UiScale);
+			const int CX = X + Gap + (i % Cols) * (Card + Gap);
+			const int CY = GridY + (i / Cols) * (Card + static_cast<int>(46 * UiScale));
+			const bool bCurrent = i == static_cast<int>(P.Hero);
+			PortraitCard(Portrait(static_cast<HeroId>(i)), CX, CY, Card, D.Accent, bCurrent);
+			std::snprintf(Buf, sizeof(Buf), "%d", i + 1);
+			DrawRectangle(CX - 3, CY - 3, static_cast<int>(26 * UiScale), static_cast<int>(26 * UiScale), D.Accent);
+			DrawText(Buf, CX + 4, CY, static_cast<int>(22 * UiScale), BLACK);
+			Centered(D.Name, CX + Card / 2, CY + Card + 6, static_cast<int>(16 * UiScale), bCurrent ? D.Accent : WHITE);
+			Centered(D.Universe, CX + Card / 2, CY + Card + 6 + static_cast<int>(18 * UiScale), static_cast<int>(13 * UiScale), Color{ 170, 170, 190, 255 });
 		}
-		LY += 10;
+		int LY = GridY + 2 * (Card + static_cast<int>(46 * UiScale)) + static_cast<int>(8 * UiScale);
 		const bool CanTravel = M.Label == "Terminal_Retroville";
-		Shadowed(CanTravel ? "T  Travel to Retroville (vertical slice)" : "T  Travel (portal unstable - only Retroville is open)", X + 24, LY, Fs,
+		Centered(CanTravel ? "T  Travel to Retroville (vertical slice)" : "T  Travel (portal unstable - only Retroville is open)", SW / 2, LY, Fs,
 		         CanTravel ? Color{ 255, 220, 120, 255 } : Color{ 150, 150, 170, 255 });
 		LY += Fs + 10;
-		Shadowed("E / Esc  Close", X + 24, LY, Fs, Color{ 180, 180, 200, 255 });
+		Centered("E / Esc  Close", SW / 2, LY, Fs, Color{ 180, 180, 200, 255 });
 	}
 
 	// Help overlay.
@@ -220,7 +251,7 @@ void Game::DrawHud(int SW, int SH)
 			"LMB attack   Q signature   R Ghost Wail (Danny)   F ultimate   Tab fly (flyers)",
 			"E interact: terminals (swap hero / travel), hover car   P return to Nexus",
 			"Ben: 1/2/3 transform, Q dial, G Master Control Glitch, F Way Big (full meter)",
-			"Esc pause/quit   F11 fullscreen   Debug: F5 spawn enemies  F6 fill meter  F7 next hero",
+			"M art style (cut-outs / 3D)   Esc pause/quit   F11 fullscreen   Debug: F5 enemies  F6 meter  F7 next hero",
 		};
 		const int LH = static_cast<int>(18 * UiScale);
 		int W = 0;

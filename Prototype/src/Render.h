@@ -39,6 +39,12 @@ public:
 	// are centred on the origin with extent 1 on every axis.
 	void Draw(MeshKind Kind, const Matrix& Transform, Color Tint, float LineWeight = 1.0f, float Emissive = 0.0f);
 
+	// Camera-facing cut-out sprite ("paper doll"). Feet = bottom-centre in
+	// raylib space; Right = horizontal camera-right; ToCamera = horizontal
+	// direction toward the camera. Size in metres; Roll leans the sprite.
+	void DrawSprite(const Texture2D& Tex, Vector3 Feet, Vector3 Right, Vector3 ToCamera, float Width, float Height,
+	                float Roll, bool bFlip, Color Tint, float Flash, float LineWeight);
+
 	// Composites colour + outlines to the backbuffer (call between BeginDrawing/EndDrawing).
 	void Composite(const SceneLighting& Light);
 
@@ -58,6 +64,12 @@ private:
 	Shader CelShader{};
 	Shader NormalShader{};
 	Shader OutlineShader{};
+	Shader SpriteShader{};
+	Shader SpriteNormalShader{};
+	Material SpriteMaterial{};
+	Material SpriteNormalMaterial{};
+	Mesh SpriteQuad{};
+	int LocSpriteFlash = -1, LocSpriteFogColor = -1, LocSpriteFogDensity = -1, LocSpriteViewPos = -1, LocSpriteLineWeight = -1;
 	RenderTexture2D ColorTarget{};
 	RenderTexture2D NormalTarget{};
 

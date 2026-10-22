@@ -25,6 +25,9 @@ struct Block
 	float PitchDeg = 0.0f;
 	bool Solid = true;
 	bool PhaseBlocker = false;
+	// Pyramid roof on top of the box (0 = flat). Walkable slope, see ResolveCylinder.
+	float RoofHeight = 0.0f;
+	static constexpr float RoofOverhang = 1.12f;
 
 	// Derived collision data.
 	Vector3 Half{};
@@ -58,6 +61,9 @@ struct Level
 };
 
 bool LoadLevel(const std::string& Path, Level& Out, std::string& Error);
+
+// Recomputes a block's derived collision data after its centre/size change.
+void FinalizeBlock(Block& B);
 
 // Unreal cm (Z up) -> raylib metres (Y up).
 inline Vector3 ToRender(Vector3 Ue) { return Vector3{ Ue.x * 0.01f, Ue.z * 0.01f, Ue.y * 0.01f }; }

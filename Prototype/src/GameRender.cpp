@@ -84,6 +84,7 @@ namespace
 		const unsigned H = Hash(L);
 		if (Contains(L, "_Volume")) { S.Hidden = true; return S; }
 		if (StartsWith(L, "FlightGate") || StartsWith(L, "RaceGate")) { S.Gate = true; S.Tint = Color{ 120, 255, 210, 255 }; return S; }
+		if (StartsWith(L, "EarthPillar")) { S.Tint = Color{ 115, 92, 72, 255 }; return S; }
 
 		if (LevelIndex == 0)
 		{
@@ -105,12 +106,12 @@ namespace
 		static const Color TowerColors[] = { { 150, 170, 200, 255 }, { 120, 145, 185, 255 }, { 175, 185, 205, 255 }, { 110, 160, 190, 255 } };
 		if (L == "Ground") S.Tint = Color{ 115, 195, 95, 255 };
 		else if (StartsWith(L, "Road")) S.Tint = Color{ 75, 75, 85, 255 };
-		else if (StartsWith(L, "Suburb")) { S.Tint = HouseColors[H % 6]; S.Roof = true; }
+		else if (StartsWith(L, "Suburb")) S.Tint = HouseColors[H % 6];
 		else if (StartsWith(L, "Downtown")) S.Tint = TowerColors[H % 4];
-		else if (L == "Neutron_House") { S.Tint = Color{ 245, 245, 250, 255 }; S.Roof = true; }
+		else if (L == "Neutron_House") S.Tint = Color{ 245, 245, 250, 255 };
 		else if (StartsWith(L, "Neutron_Lab")) S.Tint = Color{ 205, 60, 60, 255 };
 		else if (StartsWith(L, "School")) S.Tint = Color{ 200, 95, 70, 255 };
-		else if (StartsWith(L, "CandyBar")) { S.Tint = Color{ 250, 165, 200, 255 }; S.Roof = true; }
+		else if (StartsWith(L, "CandyBar")) S.Tint = Color{ 250, 165, 200, 255 };
 		else if (L == "Park_Lawn") S.Tint = Color{ 90, 170, 75, 255 };
 		else if (StartsWith(L, "Park_Silo")) S.Tint = Color{ 155, 155, 170, 255 };
 		else if (StartsWith(L, "Retroland_Ferris")) S.Tint = Color{ 255, 90, 100, 255 };
@@ -168,23 +169,36 @@ namespace
 		}
 	};
 
-	// Shared kid-sized humanoid (140 cm). Returns nothing; extras are drawn by the caller.
-	void Humanoid(const Rig& G, Color Skin, Color Shirt, Color Pants, Color Shoes, float Swing, float ArmSwing, bool bHead = true, float HeadSize = 36.0f)
+	// Shared kid-sized humanoid (140 cm). Arm angles swing forward from the
+	// shoulder (90 = pointing straight ahead); returns nothing, props are added
+	// by the caller at HandF/HandU.
+	void Humanoid(const Rig& G, Color Skin, Color Shirt, Color Pants, Color Shoes, float LegSwing,
+	              float RightArm, float LeftArm, bool bHead = true, float HeadSize = 36.0f, bool bLegs = true)
 	{
-		G.Limb(0, 8, 46, 12, 44, Swing, Pants);
-		G.Limb(0, -8, 46, 12, 44, -Swing, Pants);
-		G.Part(MeshKind::Cube, 3, 8, 3, 18, 12, 7, Shoes);
-		G.Part(MeshKind::Cube, 3, -8, 3, 18, 12, 7, Shoes);
+		if (bLegs)
+		{
+			G.Limb(0, 8, 46, 12, 44, LegSwing, Pants);
+			G.Limb(0, -8, 46, 12, 44, -LegSwing, Pants);
+			G.Part(MeshKind::Cube, 3 + std::sin(LegSwing * Deg2Rad) * 40, 8, 3, 18, 12, 7, Shoes);
+			G.Part(MeshKind::Cube, 3 - std::sin(LegSwing * Deg2Rad) * 40, -8, 3, 18, 12, 7, Shoes);
+		}
 		G.Part(MeshKind::Cube, 0, 0, 64, 20, 30, 38, Shirt);
-		G.Limb(0, 20, 80, 9, 36, -ArmSwing, Shirt);
-		G.Limb(0, -20, 80, 9, 36, ArmSwing, Shirt);
+		G.Limb(0, 20, 80, 9, 36, RightArm, Shirt);
+		G.Limb(0, -20, 80, 9, 36, LeftArm, Shirt);
+		G.Part(MeshKind::Sphere, std::sin(RightArm * Deg2Rad) * 38, 20, 80 - std::cos(RightArm * Deg2Rad) * 38, 11, 11, 11, Skin);
+		G.Part(MeshKind::Sphere, std::sin(LeftArm * Deg2Rad) * 38, -20, 80 - std::cos(LeftArm * Deg2Rad) * 38, 11, 11, 11, Skin);
 		if (bHead)
 		{
 			G.Part(MeshKind::Sphere, 0, 0, 100, HeadSize, HeadSize, HeadSize, Skin);
-			G.Part(MeshKind::Sphere, HeadSize * 0.42f, 6, 103, 6, 6, 8, Color{ 25, 25, 30, 255 });
-			G.Part(MeshKind::Sphere, HeadSize * 0.42f, -6, 103, 6, 6, 8, Color{ 25, 25, 30, 255 });
+			G.Part(MeshKind::Sphere, HeadSize * 0.42f, 6, 103, 7, 6, 9, Color{ 250, 250, 255, 255 });
+			G.Part(MeshKind::Sphere, HeadSize * 0.42f, -6, 103, 7, 6, 9, Color{ 250, 250, 255, 255 });
+			G.Part(MeshKind::Sphere, HeadSize * 0.47f, 6, 103, 4, 4, 5, Color{ 25, 25, 30, 255 });
+			G.Part(MeshKind::Sphere, HeadSize * 0.47f, -6, 103, 4, 4, 5, Color{ 25, 25, 30, 255 });
 		}
 	}
+
+	float HandF(float Angle) { return std::sin(Angle * Deg2Rad) * 38.0f; }
+	float HandU(float Angle) { return 80.0f - std::cos(Angle * Deg2Rad) * 38.0f; }
 }
 
 SceneLighting Game::Lighting() const
@@ -432,12 +446,12 @@ void Game::RenderBlocks(ToonRenderer& R, bool bTranslucent)
 		if (B.Kind == Shape::Plane) Size.z = 4.0f;
 		R.Draw(MeshFor(B.Kind), BoxTransform(B.Center, Size, B.YawDeg, B.PitchDeg), S.Tint, EnvLineWeight, S.Emissive);
 
-		if (S.Roof)
+		if (B.RoofHeight > 0.0f)
 		{
-			const float RoofH = std::min(B.Size.x, B.Size.y) * 0.45f;
+			const float RoofH = B.RoofHeight;
 			const Vector3 Top{ B.Center.x, B.Center.y, B.Center.z + B.Half.z + RoofH * 0.5f };
 			const Color RoofColor = (Hash(B.Label) % 3 == 0) ? Color{ 90, 110, 160, 255 } : (Hash(B.Label) % 3 == 1 ? Color{ 185, 80, 70, 255 } : Color{ 110, 90, 80, 255 });
-			R.Draw(MeshKind::Pyramid, BoxTransform(Top, Vector3{ B.Size.x * 1.12f, B.Size.y * 1.12f, RoofH }, B.YawDeg), RoofColor, EnvLineWeight);
+			R.Draw(MeshKind::Pyramid, BoxTransform(Top, Vector3{ B.Size.x * Block::RoofOverhang, B.Size.y * Block::RoofOverhang, RoofH }, B.YawDeg), RoofColor, EnvLineWeight);
 		}
 	}
 }
@@ -454,28 +468,41 @@ void Game::RenderTerminal(ToonRenderer& R, const Marker& M, int Index)
 	R.Draw(MeshKind::Sphere, BoxTransform(Add(Base, Vector3{ 0, 0, 260 + std::sin(Time * 2 + Index) * 15 }), Vector3{ 70, 70, 70 }, Time * 40.0f), U, 1.0f, 1.0f);
 }
 
+
 void Game::RenderCar(ToonRenderer& R, const HoverCar& Car)
 {
+	// Jimmy's retro hover convertible (see Prototype/assets/concept).
 	Rig G{ &R, Sub(Car.Pos, Vector3{ 0, 0, 30 }), Car.Yaw, 1.0f, 1.6f, 255 };
-	const float P = Car.VisPitch, Ro = Car.VisRoll;
+	const float Pr = Car.VisPitch * Deg2Rad, Rr = Car.VisRoll * Deg2Rad;
 	auto Part = [&](MeshKind K, float F, float Rt, float U, float SF, float SR, float SU, Color C, float Em = 0.0f, float ExtraPitch = 0.0f) {
 		// Rotate the offset by the visual pitch/roll so the body tilts as one piece.
-		const float Pr = P * Deg2Rad, Rr = Ro * Deg2Rad;
 		const float U1 = U * std::cos(Pr) + F * std::sin(Pr);
 		const float F1 = F * std::cos(Pr) - U * std::sin(Pr);
 		const float U2 = U1 * std::cos(Rr) - Rt * std::sin(Rr);
 		const float R2 = Rt * std::cos(Rr) + U1 * std::sin(Rr);
-		G.Part(K, F1, R2, U2, SF, SR, SU, C, Em, P + ExtraPitch, 0.0f, -Ro);
+		G.Part(K, F1, R2, U2, SF, SR, SU, C, Em, Car.VisPitch + ExtraPitch, 0.0f, -Car.VisRoll);
 	};
-	Part(MeshKind::Cube, 0, 0, 30, 420, 190, 60, Color{ 225, 55, 55, 255 });
-	Part(MeshKind::Cube, 40, 0, 63, 300, 120, 8, Color{ 250, 250, 250, 255 });
-	Part(MeshKind::Sphere, -10, 0, 85, 170, 130, 90, Color{ 150, 220, 255, 255 }, 0.25f);
-	Part(MeshKind::Cube, -200, 0, 80, 40, 220, 14, Color{ 225, 55, 55, 255 });
-	Part(MeshKind::Cylinder, -225, 60, 35, 50, 50, 70, Color{ 90, 90, 110, 255 }, 0.0f, 90.0f);
-	Part(MeshKind::Cylinder, -225, -60, 35, 50, 50, 70, Color{ 90, 90, 110, 255 }, 0.0f, 90.0f);
+	const Color Red{ 225, 50, 40, 255 }, Chrome{ 225, 228, 235, 255 }, Seat{ 60, 95, 205, 255 };
+	Part(MeshKind::Cube, 0, 0, 25, 430, 190, 44, Red);                       // lower body
+	Part(MeshKind::Cube, 120, 0, 52, 170, 176, 14, Red);                     // hood
+	Part(MeshKind::Cube, -150, 0, 54, 120, 176, 18, Red);                    // trunk
+	Part(MeshKind::Cube, 40, 0, 50, 6, 190, 4, Color{ 250, 250, 250, 255 }); // white stripe
+	Part(MeshKind::Cube, 30, 0, 78, 6, 160, 40, Color{ 160, 225, 255, 255 }, 0.3f, 25.0f); // windshield
+	Part(MeshKind::Cube, -10, 42, 58, 50, 60, 22, Seat);
+	Part(MeshKind::Cube, -10, -42, 58, 50, 60, 22, Seat);
+	Part(MeshKind::Cube, -36, 42, 82, 12, 60, 40, Seat);
+	Part(MeshKind::Cube, -36, -42, 82, 12, 60, 40, Seat);
+	Part(MeshKind::Cube, 218, 0, 22, 12, 200, 16, Chrome);                   // bumpers
+	Part(MeshKind::Cube, -218, 0, 22, 12, 200, 16, Chrome);
+	Part(MeshKind::Sphere, 212, 62, 40, 18, 34, 34, Color{ 255, 250, 210, 255 }, 0.9f); // headlights
+	Part(MeshKind::Sphere, 212, -62, 40, 18, 34, 34, Color{ 255, 250, 210, 255 }, 0.9f);
+	Part(MeshKind::Cone, -190, 80, 80, 50, 14, 60, Red, 0.0f, 35.0f);        // tail fins
+	Part(MeshKind::Cone, -190, -80, 80, 50, 14, 60, Red, 0.0f, 35.0f);
 	const float Thrust = 0.5f + 0.5f * std::sin(Time * 30.0f);
-	Part(MeshKind::Sphere, -262, 60, 35, 30, 34, 34, Color{ 120, 230, 255, 255 }, 0.7f + 0.3f * Thrust);
-	Part(MeshKind::Sphere, -262, -60, 35, 30, 34, 34, Color{ 120, 230, 255, 255 }, 0.7f + 0.3f * Thrust);
+	Part(MeshKind::Cylinder, -228, 50, 30, 40, 40, 30, Color{ 90, 90, 110, 255 }, 0.0f, 90.0f);
+	Part(MeshKind::Cylinder, -228, -50, 30, 40, 40, 30, Color{ 90, 90, 110, 255 }, 0.0f, 90.0f);
+	Part(MeshKind::Sphere, -248, 50, 30, 26, 30, 30, Color{ 120, 230, 255, 255 }, 0.7f + 0.3f * Thrust);
+	Part(MeshKind::Sphere, -248, -50, 30, 26, 30, 30, Color{ 120, 230, 255, 255 }, 0.7f + 0.3f * Thrust);
 	const float Pads[4][2] = { { 180, 90 }, { 180, -90 }, { -180, 90 }, { -180, -90 } };
 	for (const auto& Pd : Pads)
 	{
@@ -483,18 +510,130 @@ void Game::RenderCar(ToonRenderer& R, const HoverCar& Car)
 	}
 	if (Car.Occupied)
 	{
-		const HeroDef& H = GetHeroDef(this->P.Hero);
-		Part(MeshKind::Sphere, -10, 0, 120, 34, 34, 34, H.Skin);
-		Part(MeshKind::Cube, -10, 0, 90, 20, 28, 30, H.Primary);
-		if (this->P.Hero == HeroId::Jimmy)
+		const HeroDef& H = GetHeroDef(P.Hero);
+		Part(MeshKind::Cube, -10, 42, 92, 20, 28, 30, H.Primary);
+		Part(MeshKind::Sphere, -10, 42, 122, 34, 34, 34, H.Skin);
+		if (P.Hero == HeroId::Jimmy)
 		{
-			Part(MeshKind::Sphere, -10, 0, 142, 30, 30, 24, H.Hair);
+			Part(MeshKind::Sphere, -12, 42, 142, 34, 34, 22, H.Hair);
+			Part(MeshKind::Cone, -14, 42, 160, 24, 24, 30, H.Hair);
 		}
+		// Goddard rides shotgun.
+		Part(MeshKind::Cube, -10, -42, 88, 34, 22, 24, Color{ 200, 205, 215, 255 });
+		Part(MeshKind::Cube, 4, -42, 108, 22, 20, 18, Color{ 200, 205, 215, 255 });
 	}
+}
+
+void Game::RenderGoddard(ToonRenderer& R)
+{
+	if (P.Hero != HeroId::Jimmy || CarIndex >= 0 || P.RespawnTimer > 0.0f)
+	{
+		return;
+	}
+	Rig G{ &R, GoddardPos, GoddardYaw, 1.0f, 1.2f, 255 };
+	const Color Silver{ 200, 205, 218, 255 }, Ears{ 55, 75, 150, 255 }, Dark{ 70, 75, 90, 255 };
+	const float Trot = std::sin(Time * 14.0f) * (GoddardSpeed > 60.0f ? 22.0f : 0.0f);
+	const float Wag = std::sin(Time * 9.0f) * 25.0f;
+	G.Limb(15, 10, 24, 8, 22, Trot, Dark);
+	G.Limb(15, -10, 24, 8, 22, -Trot, Dark);
+	G.Limb(-15, 10, 24, 8, 22, -Trot, Dark);
+	G.Limb(-15, -10, 24, 8, 22, Trot, Dark);
+	G.Part(MeshKind::Cube, 0, 0, 32, 48, 28, 24, Silver);
+	G.Part(MeshKind::Cube, 30, 0, 52, 26, 24, 22, Silver);
+	G.Part(MeshKind::Cube, 43.5f, 0, 52, 2, 18, 13, Color{ 30, 45, 70, 255 }, 0.4f);   // screen face
+	G.Part(MeshKind::Sphere, 44.5f, 5, 54, 3, 4, 4, Color{ 120, 230, 255, 255 }, 1.0f);
+	G.Part(MeshKind::Sphere, 44.5f, -5, 54, 3, 4, 4, Color{ 120, 230, 255, 255 }, 1.0f);
+	G.Part(MeshKind::Cube, 28, 15, 56, 14, 4, 24, Ears, 0.0f, 0.0f, 0.0f, 25.0f + Wag * 0.2f);
+	G.Part(MeshKind::Cube, 28, -15, 56, 14, 4, 24, Ears, 0.0f, 0.0f, 0.0f, -25.0f - Wag * 0.2f);
+	G.Part(MeshKind::Cylinder, -28, 0, 44, 4, 4, 22, Dark, 0.0f, 55.0f, Wag);           // antenna tail
+	G.Part(MeshKind::Sphere, -36, 0, 52, 6, 6, 6, Color{ 255, 80, 80, 255 }, 0.8f);
+}
+
+bool Game::RenderHeroSprite(ToonRenderer& R, unsigned char Alpha, bool bHurt)
+{
+	const FormDef* Form = P.Hero == HeroId::Ben ? GetFormDef(P.Omni.GetActiveForm()) : nullptr;
+	int Id = static_cast<int>(P.Hero);
+	float BaseH = 70.0f;
+	if (Form)
+	{
+		const std::string Name = Form->Name;
+		if (Name == "Heatblast") Id = SprHeatblast;
+		else if (Name == "Four Arms") Id = SprFourArms;
+		else return false; // XLR8, Cannonbolt and Way Big aren't on the sheet: 3D models
+		BaseH = Form->HalfHeight;
+	}
+	else if (P.Hero == HeroId::Jake && P.Flying)
+	{
+		Id = SprDragon;
+	}
+	const SpriteArt& S = Sprites[Id];
+	if (S.Tex.id == 0)
+	{
+		return false;
+	}
+
+	const HeroDef& H = GetHeroDef(P.Hero);
+	const float Speed = std::sqrt(P.Vel.x * P.Vel.x + P.Vel.y * P.Vel.y);
+	const float Scale = P.H / BaseH;
+	float SX = 1.0f, SY = 1.0f + 0.015f * std::sin(Time * 3.0f); // idle breathing
+	float Bob = 0.0f, Roll = 0.0f;
+	if (P.Grounded && Speed > 50.0f)
+	{
+		const float Amt = std::min(1.0f, Speed / 650.0f);
+		Bob = std::fabs(std::sin(P.WalkPhase)) * 8.0f * Amt * Scale;
+		Roll = std::sin(P.WalkPhase) * 0.07f * Amt;
+	}
+	const float ScreenRight = P.Vel.x * -std::sin(CamYaw * Deg2Rad) + P.Vel.y * std::cos(CamYaw * Deg2Rad);
+	if (!P.Grounded)
+	{
+		Roll = std::clamp(-ScreenRight / 2500.0f, -0.3f, 0.3f); // lean into the turn
+		if (!P.Flying) { SY *= P.Vel.z > 200.0f ? 1.06f : 1.0f; SX *= P.Vel.z > 200.0f ? 0.96f : 1.0f; }
+		if (P.Flying || P.Gliding) Bob = std::sin(Time * 2.5f) * 5.0f;
+	}
+	if (P.LandTimer > 0.0f)
+	{
+		const float T = P.LandTimer / 0.18f;
+		SY *= 1.0f - 0.14f * T;
+		SX *= 1.0f + 0.12f * T;
+	}
+	if (P.AttackAnim > 0.0f)
+	{
+		SX *= 1.06f;
+		SY *= 1.04f;
+		Roll += (P.SpriteFlip ? 0.08f : -0.08f);
+	}
+
+	const float Height = S.HeightCm * Scale * SY;
+	const float Width = S.HeightCm * Scale * SX * static_cast<float>(S.Tex.width) / static_cast<float>(S.Tex.height);
+	const Vector3 Right{ -std::sin(CamYaw * Deg2Rad), 0.0f, std::cos(CamYaw * Deg2Rad) };
+	const Vector3 ToCam{ -std::cos(CamYaw * Deg2Rad), 0.0f, -std::sin(CamYaw * Deg2Rad) };
+	const Vector3 Feet = Sub(P.Pos, Vector3{ 0, 0, P.H - Bob });
+	R.DrawSprite(S.Tex, ToRender(Feet), Right, ToCam, Width * 0.01f, Height * 0.01f, Roll, P.SpriteFlip,
+	             Color{ 255, 255, 255, Alpha }, bHurt ? 0.75f : 0.0f, H.LineWeight);
+
+	// Cosmo & Wanda: hovering at Timmy's shoulder, or his cloud-board in flight.
+	const SpriteArt& F = Sprites[SprFairies];
+	if (P.Hero == HeroId::Timmy && F.Tex.id != 0)
+	{
+		const float FH = F.HeightCm * (P.Flying ? 1.4f : 1.0f);
+		const float FW = FH * static_cast<float>(F.Tex.width) / static_cast<float>(F.Tex.height);
+		const Vector3 RightUe{ -std::sin(CamYaw * Deg2Rad), std::cos(CamYaw * Deg2Rad), 0.0f };
+		const Vector3 BackUe{ std::cos(CamYaw * Deg2Rad), std::sin(CamYaw * Deg2Rad), 0.0f };
+		Vector3 FPos = P.Flying ? Sub(Feet, Vector3{ 0, 0, FH * 0.55f })
+		                        : Add(Add(Feet, Mul(RightUe, Width * 0.5f + 25.0f)), Vector3{ 0, 0, Height * 0.62f + std::sin(Time * 3.0f) * 8.0f });
+		FPos = Add(FPos, Mul(BackUe, P.Flying ? 0.0f : 10.0f));
+		R.DrawSprite(F.Tex, ToRender(FPos), Right, ToCam, FW * 0.01f, FH * 0.01f, std::sin(Time * 2.0f) * 0.06f, false,
+		             Color{ 255, 255, 255, Alpha }, 0.0f, H.LineWeight);
+	}
+	return true;
 }
 
 void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 {
+	if (!bTranslucent)
+	{
+		RenderGoddard(R);
+	}
 	if (P.RespawnTimer > 0.0f || CarIndex >= 0)
 	{
 		return;
@@ -508,11 +647,22 @@ void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 	const FormDef* Form = P.Hero == HeroId::Ben ? GetFormDef(P.Omni.GetActiveForm()) : nullptr;
 	const Vector3 Feet = Sub(P.Pos, Vector3{ 0, 0, P.H });
 	const float Speed = std::sqrt(P.Vel.x * P.Vel.x + P.Vel.y * P.Vel.y);
-	const float Swing = (P.Grounded ? std::min(1.0f, Speed / 600.0f) : 0.3f) * std::sin(P.WalkPhase) * 35.0f;
-	const float AttackSwing = P.AttackAnim > 0.0f ? 70.0f : 0.0f;
+	const bool bAttack = P.AttackAnim > 0.0f || P.BreathTime > 0.0f;
+	float Leg = (P.Grounded ? std::min(1.0f, Speed / 600.0f) : 0.25f) * std::sin(P.WalkPhase) * 35.0f;
+	float RA = bAttack ? 85.0f : -Leg * 0.8f;
+	float LA = Leg * 0.8f;
+	if (P.Flying)
+	{
+		Leg = -12.0f;
+		RA = bAttack ? 85.0f : -25.0f;
+		LA = -25.0f;
+	}
 	const unsigned char Alpha = bGhost ? 110 : 255;
 	const bool bHurt = P.HurtFlash > 0.0f && std::fmod(Time, 0.1f) < 0.05f;
 	auto Tint = [&](Color C) { return bHurt ? Color{ 255, 255, 255, C.a } : C; };
+	// Point along an arm, Dist cm past the hand.
+	auto AlongF = [](float A, float Dist) { return HandF(A) + std::sin(A * Deg2Rad) * Dist; };
+	auto AlongU = [](float A, float Dist) { return HandU(A) - std::cos(A * Deg2Rad) * Dist; };
 
 	if (P.Hero == HeroId::Ben && P.Omni.GetState() == Omnitrix::EState::Transforming)
 	{
@@ -521,35 +671,51 @@ void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 		return;
 	}
 
+	if (bSpriteArt && RenderHeroSprite(R, Alpha, bHurt))
+	{
+		return;
+	}
+
 	if (Form)
 	{
-		const float S = P.H / Form->HalfHeight;
-		Rig G{ &R, Feet, P.Yaw, S, 2.0f, Alpha };
+		Rig G{ &R, Feet, P.Yaw, P.H / Form->HalfHeight, 2.0f, Alpha };
 		const std::string Name = Form->Name;
 		if (Name == "Heatblast")
 		{
-			Rig G2 = G;
-			G2.Scale = P.H / 70.0f * 0.95f;
-			Humanoid(G2, Form->Body, Form->Body, Shade(Form->Body, 0.7f), Shade(Form->Body, 0.5f), Swing, Swing + AttackSwing, false);
+			G.Scale = P.H / 70.0f * 0.95f;
+			const Color Magma = Tint(Form->Body), Rock = Shade(Form->Body, 0.6f);
+			Humanoid(G, Magma, Magma, Rock, Shade(Form->Body, 0.45f), Leg, RA, LA, false);
+			for (int k = 0; k < 3; ++k)
+			{
+				G.Part(MeshKind::Cube, 10.5f, -6 + k * 6, 58 + k * 8, 2, 3, 14, Color{ 255, 210, 60, 255 }, 1.0f, 0.0f, 0.0f, 30.0f - k * 25.0f);
+			}
 			const float Flick = std::sin(Time * 20.0f) * 4.0f;
-			G2.Part(MeshKind::Sphere, 0, 0, 100, 34, 34, 34, Form->Body, 0.3f);
-			G2.Part(MeshKind::Cone, -2, 0, 128 + Flick, 34, 34, 50, Color{ 255, 170, 40, 255 }, 1.0f);
-			G2.Part(MeshKind::Cone, -6, 0, 150 + Flick, 18, 18, 34, Color{ 255, 240, 120, 255 }, 1.0f);
-			G2.Part(MeshKind::Sphere, 15, 6, 102, 7, 7, 8, Color{ 255, 255, 180, 255 }, 1.0f);
-			G2.Part(MeshKind::Sphere, 15, -6, 102, 7, 7, 8, Color{ 255, 255, 180, 255 }, 1.0f);
+			G.Part(MeshKind::Sphere, 0, 0, 100, 34, 34, 34, Magma, 0.3f);
+			G.Part(MeshKind::Cone, -2, 0, 128 + Flick, 36, 36, 52, Color{ 255, 160, 30, 255 }, 1.0f);
+			G.Part(MeshKind::Cone, -6, 0, 152 + Flick, 20, 20, 36, Color{ 255, 240, 120, 255 }, 1.0f);
+			G.Part(MeshKind::Sphere, 15, 6, 102, 7, 7, 8, Color{ 255, 255, 180, 255 }, 1.0f);
+			G.Part(MeshKind::Sphere, 15, -6, 102, 7, 7, 8, Color{ 255, 255, 180, 255 }, 1.0f);
+			if (bAttack)
+			{
+				G.Part(MeshKind::Sphere, HandF(RA), 20, HandU(RA), 18, 18, 18, Color{ 255, 190, 40, 255 }, 1.0f);
+			}
 		}
 		else if (Name == "Four Arms")
 		{
-			// 240 cm red brute with two pairs of arms.
+			// 240 cm red brute: black top with a white stripe, gold belt, two pairs of arms.
 			G.Scale = P.H / 120.0f;
-			G.Limb(0, 16, 80, 22, 80, Swing, Form->Accent);
-			G.Limb(0, -16, 80, 22, 80, -Swing, Form->Accent);
-			G.Part(MeshKind::Cube, 0, 0, 125, 44, 70, 70, Form->Body);
-			G.Limb(0, 44, 155, 20, 70, -Swing - AttackSwing, Form->Body);
-			G.Limb(0, -44, 155, 20, 70, Swing + AttackSwing, Form->Body);
-			G.Limb(0, 40, 128, 18, 62, Swing * 0.5f + AttackSwing * 0.7f, Form->Body);
-			G.Limb(0, -40, 128, 18, 62, -Swing * 0.5f + AttackSwing * 0.7f, Form->Body);
-			G.Part(MeshKind::Sphere, 4, 0, 180, 40, 40, 38, Form->Body);
+			const Color Skin = Tint(Form->Body), Black{ 35, 35, 40, 255 };
+			G.Limb(0, 16, 80, 22, 80, Leg, Black);
+			G.Limb(0, -16, 80, 22, 80, -Leg, Black);
+			G.Part(MeshKind::Cube, 0, 0, 125, 44, 70, 70, Black);
+			G.Part(MeshKind::Cube, 0, 0, 125, 45, 18, 70, Color{ 240, 240, 240, 255 });
+			G.Part(MeshKind::Cube, 0, 0, 92, 46, 72, 8, Color{ 230, 190, 60, 255 });
+			const float Punch = bAttack ? 80.0f : 0.0f;
+			G.Limb(0, 44, 155, 20, 70, -Leg + Punch, Skin);
+			G.Limb(0, -44, 155, 20, 70, Leg + Punch, Skin);
+			G.Limb(0, 40, 128, 18, 62, Leg * 0.5f + Punch * 0.7f, Skin);
+			G.Limb(0, -40, 128, 18, 62, -Leg * 0.5f + Punch * 0.7f, Skin);
+			G.Part(MeshKind::Sphere, 4, 0, 180, 40, 40, 38, Skin);
 			for (int e = 0; e < 4; ++e)
 			{
 				G.Part(MeshKind::Sphere, 21, e < 2 ? 8 : -8, e % 2 ? 176 : 186, 6, 6, 6, Color{ 255, 220, 60, 255 }, 0.8f);
@@ -559,11 +725,11 @@ void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 		{
 			G.Scale = P.H / 75.0f;
 			const float Lean = std::min(1.0f, Speed / 1500.0f) * 25.0f;
-			G.Limb(0, 9, 50, 12, 48, Swing * 1.4f, Form->Accent);
-			G.Limb(0, -9, 50, 12, 48, -Swing * 1.4f, Form->Accent);
-			G.Part(MeshKind::Cube, 4, 0, 70, 22, 28, 40, Form->Body, 0.0f, -Lean);
-			G.Limb(4, 20, 86, 9, 36, -Swing - AttackSwing, Form->Body);
-			G.Limb(4, -20, 86, 9, 36, Swing + AttackSwing, Form->Body);
+			G.Limb(0, 9, 50, 12, 48, Leg * 1.4f, Form->Accent);
+			G.Limb(0, -9, 50, 12, 48, -Leg * 1.4f, Form->Accent);
+			G.Part(MeshKind::Cube, 4, 0, 70, 22, 28, 40, Tint(Form->Body), 0.0f, -Lean);
+			G.Limb(4, 20, 86, 9, 36, RA, Form->Body);
+			G.Limb(4, -20, 86, 9, 36, LA, Form->Body);
 			G.Part(MeshKind::Sphere, 14, 0, 108, 36, 30, 32, Form->Body);
 			G.Part(MeshKind::Cube, 30, 0, 110, 22, 24, 14, Color{ 20, 20, 25, 255 }, 0.0f, 10.0f);
 			G.Part(MeshKind::Cone, -32, 0, 56, 14, 14, 60, Form->Body, 0.0f, 120.0f);
@@ -582,7 +748,7 @@ void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 		else // Way Big
 		{
 			G.Scale = P.H / 70.0f;
-			Humanoid(G, Form->Body, Form->Body, Form->Accent, Form->Accent, Swing * 0.6f, Swing * 0.6f + AttackSwing, false);
+			Humanoid(G, Form->Body, Form->Body, Form->Accent, Form->Accent, Leg * 0.6f, RA, LA, false);
 			G.Part(MeshKind::Cube, 0.5f, 0, 64, 21, 10, 40, Form->Accent);
 			G.Part(MeshKind::Sphere, 0, 0, 100, 34, 30, 36, Form->Body);
 			G.Part(MeshKind::Cone, -2, 0, 124, 8, 30, 30, Form->Accent);
@@ -596,144 +762,235 @@ void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 	const Color Skin = Tint(H.Skin);
 	const Color Shirt = Tint(H.Primary);
 	const Color Pants = Tint(H.Secondary);
-	const float ArmSwing = Swing + AttackSwing;
+	const Color White{ 245, 245, 250, 255 };
 
 	switch (P.Hero)
 	{
 	case HeroId::Jimmy:
-		Humanoid(G, Skin, Shirt, Pants, Color{ 250, 250, 250, 255 }, Swing, ArmSwing, true, 42.0f);
-		G.Part(MeshKind::Sphere, -2, 0, 126, 34, 34, 26, H.Hair);
-		G.Part(MeshKind::Cone, -4, 0, 146, 18, 18, 24, H.Hair);
-		G.Part(MeshKind::Sphere, 9, 0, 70, 8, 10, 10, Color{ 255, 230, 120, 255 }, 0.6f); // atom
-		G.Part(MeshKind::Cube, -14, 0, 66, 10, 20, 26, Color{ 200, 200, 210, 255 });    // jetpack
+	{
+		Humanoid(G, Skin, Shirt, Pants, White, Leg, RA, LA, true, 46.0f);
+		// The famous swirl.
+		G.Part(MeshKind::Sphere, -2, 0, 124, 42, 42, 28, H.Hair);
+		G.Part(MeshKind::Cone, -1, 0, 148, 32, 32, 42, H.Hair, 0.0f, -10.0f);
+		G.Part(MeshKind::Cone, 6, 0, 170, 15, 15, 20, H.Hair, 0.0f, -45.0f);
+		// Atom logo.
+		G.Part(MeshKind::Sphere, 10.5f, 0, 70, 3, 6, 6, Color{ 255, 220, 60, 255 }, 0.6f);
+		G.Part(MeshKind::Cube, 10.5f, 0, 70, 2, 18, 3, Color{ 255, 220, 60, 255 }, 0.4f, 0.0f, 0.0f, 50.0f);
+		G.Part(MeshKind::Cube, 10.5f, 0, 70, 2, 18, 3, Color{ 255, 220, 60, 255 }, 0.4f, 0.0f, 0.0f, -50.0f);
+		// Goddard jetpack: twin rockets.
+		for (int s = -1; s <= 1; s += 2)
+		{
+			G.Part(MeshKind::Cylinder, -16, s * 8.0f, 66, 10, 10, 30, Color{ 210, 215, 225, 255 });
+			G.Part(MeshKind::Cone, -16, s * 8.0f, 86, 10, 10, 12, Color{ 225, 50, 40, 255 });
+			if (P.SigCd > 0.2f)
+			{
+				G.Part(MeshKind::Cone, -16, s * 8.0f, 40, 10, 10, 26 + std::sin(Time * 40.0f) * 6.0f, Color{ 255, 170, 40, 255 }, 1.0f, 180.0f);
+			}
+		}
+		// Shrink ray.
+		G.Part(MeshKind::Cube, AlongF(RA, 4), 20, AlongU(RA, 4), 12, 7, 16, Color{ 120, 175, 140, 255 }, 0.0f, RA - 180.0f);
+		G.Part(MeshKind::Cylinder, AlongF(RA, 14), 20, AlongU(RA, 14), 6, 6, 14, Color{ 200, 200, 210, 255 }, 0.0f, RA - 180.0f);
+		G.Part(MeshKind::Sphere, AlongF(RA, 22), 20, AlongU(RA, 22), 8, 8, 8, Color{ 255, 70, 70, 255 }, 0.9f);
 		break;
+	}
 	case HeroId::Timmy:
 	{
-		Humanoid(G, Skin, Shirt, Pants, Color{ 250, 250, 250, 255 }, Swing, ArmSwing);
-		G.Part(MeshKind::Cylinder, 0, 0, 120, 36, 36, 14, Shirt);
-		G.Part(MeshKind::Cube, 16, 0, 114, 18, 30, 3, Shirt);
-		G.Part(MeshKind::Cube, 17, 0, 98, 4, 10, 4, Color{ 255, 255, 255, 255 }); // buck teeth
-		// Cosmo & Wanda orbiting.
-		for (int k = 0; k < 2; ++k)
-		{
-			const float A = Time * 2.0f + k * 3.14159f;
-			const Color F = k == 0 ? Color{ 90, 220, 110, 255 } : Color{ 245, 110, 180, 255 };
-			const float Fx = std::cos(A) * 55.0f, Fy = std::sin(A) * 55.0f, Fz = 125.0f + std::sin(Time * 4.0f + k) * 8.0f;
-			G.Part(MeshKind::Sphere, Fx, Fy, Fz, 18, 18, 18, F, 0.3f);
-			G.Part(MeshKind::Cone, Fx, Fy, Fz + 14, 10, 10, 10, Color{ 255, 220, 60, 255 }, 0.6f);
-		}
+		Humanoid(G, Skin, Shirt, Pants, White, Leg, RA, LA, true, 40.0f);
+		G.Part(MeshKind::Cylinder, 0, 0, 122, 40, 40, 14, Shirt);
+		G.Part(MeshKind::Sphere, -2, 0, 128, 36, 36, 18, Shirt);
+		G.Part(MeshKind::Cube, 17, 0, 117, 20, 32, 3, Shirt);
+		G.Part(MeshKind::Sphere, -6, 17, 110, 14, 10, 12, H.Hair);
+		G.Part(MeshKind::Sphere, -6, -17, 110, 14, 10, 12, H.Hair);
+		G.Part(MeshKind::Cube, 19, 2.5f, 94, 3, 4, 6, White);
+		G.Part(MeshKind::Cube, 19, -2.5f, 94, 3, 4, 6, White);
+		// Magic wand + Da Rules book.
+		G.Part(MeshKind::Cylinder, AlongF(RA, 12), 20, AlongU(RA, 12), 3, 3, 26, Color{ 30, 30, 35, 255 }, 0.0f, RA - 180.0f);
+		G.Part(MeshKind::Sphere, AlongF(RA, 26), 20, AlongU(RA, 26), 12, 12, 12, Color{ 255, 230, 70, 255 }, bAttack ? 1.0f : 0.7f);
+		G.Part(MeshKind::Cube, HandF(LA) + 4, -24, HandU(LA) + 4, 8, 22, 28, Color{ 135, 60, 165, 255 });
+		G.Part(MeshKind::Cube, HandF(LA) + 8.5f, -24, HandU(LA) + 8, 1, 14, 6, Color{ 240, 200, 80, 255 }, 0.3f);
+		// Cosmo & Wanda: orbiting, or the cloud-board while flying.
 		if (P.Flying)
 		{
-			G.Part(MeshKind::Sphere, 0, 0, -12, 110, 70, 30, Color{ 250, 250, 255, 255 }, 0.2f);
-			G.Part(MeshKind::Sphere, 30, 18, -8, 50, 50, 30, Color{ 250, 250, 255, 255 }, 0.2f);
+			G.Part(MeshKind::Sphere, 0, 0, -10, 120, 76, 30, Color{ 250, 250, 255, 255 }, 0.2f);
+			G.Part(MeshKind::Sphere, 34, 22, -6, 56, 50, 30, Color{ 200, 255, 210, 255 }, 0.2f);
+			G.Part(MeshKind::Sphere, 34, -22, -6, 56, 50, 30, Color{ 255, 205, 230, 255 }, 0.2f);
+		}
+		else
+		{
+			for (int k = 0; k < 2; ++k)
+			{
+				const float A = Time * 2.0f + k * 3.14159f;
+				const float Fx = std::cos(A) * 60.0f, Fy = std::sin(A) * 60.0f, Fz = 128.0f + std::sin(Time * 4.0f + k) * 8.0f;
+				const Color HairC = k == 0 ? Color{ 90, 210, 100, 255 } : Color{ 245, 120, 185, 255 };
+				const Color Body = k == 0 ? White : Color{ 250, 220, 80, 255 };
+				const float Flap = std::sin(Time * 30.0f) * 30.0f;
+				G.Part(MeshKind::Cylinder, Fx, Fy, Fz - 16, 10, 10, 16, Body);
+				G.Part(MeshKind::Sphere, Fx, Fy, Fz, 18, 18, 18, Color{ 250, 215, 185, 255 });
+				G.Part(MeshKind::Sphere, Fx - 2, Fy, Fz + 12, k == 0 ? 16.0f : 22.0f, k == 0 ? 16.0f : 22.0f, k == 0 ? 18.0f : 16.0f, HairC);
+				G.Part(MeshKind::Cone, Fx, Fy, Fz + 24, 8, 8, 10, Color{ 255, 220, 60, 255 }, 0.6f);
+				G.Part(MeshKind::Cube, Fx - 8, Fy + 8, Fz - 6, 2, 14, 10, Color{ 220, 240, 255, 255 }, 0.4f, 0.0f, 0.0f, 20.0f + Flap);
+				G.Part(MeshKind::Cube, Fx - 8, Fy - 8, Fz - 6, 2, 14, 10, Color{ 220, 240, 255, 255 }, 0.4f, 0.0f, 0.0f, -20.0f - Flap);
+			}
 		}
 		break;
 	}
 	case HeroId::Danny:
 	{
-		const Color White = Tint(H.Secondary);
-		Humanoid(G, Skin, Shirt, Shirt, White, Swing, ArmSwing);
+		const Color Suit = Shirt;
+		Humanoid(G, Skin, Suit, Suit, White, Leg, RA, LA, true, 38.0f, !P.Flying);
+		G.Part(MeshKind::Cube, 0, 0, 83, 21, 24, 4, White);   // collar
 		G.Part(MeshKind::Cube, 0, 0, 48, 21, 31, 6, White);   // belt
-		G.Part(MeshKind::Sphere, -3, 0, 110, 38, 38, 22, H.Hair);
-		G.Part(MeshKind::Sphere, 16, 6, 103, 6, 6, 8, Color{ 90, 255, 130, 255 }, 1.0f);
-		G.Part(MeshKind::Sphere, 16, -6, 103, 6, 6, 8, Color{ 90, 255, 130, 255 }, 1.0f);
-		G.Part(MeshKind::Cube, 10.5f, 0, 70, 2, 14, 14, White); // DP logo
+		G.Part(MeshKind::Cube, 10.5f, 0, 70, 2, 14, 12, White); // DP emblem
+		G.Part(MeshKind::Cube, 11.0f, 2, 70, 2, 4, 8, Suit);
+		G.Part(MeshKind::Sphere, -3, 0, 112, 40, 40, 24, H.Hair);
+		G.Part(MeshKind::Cone, -14, 0, 112, 14, 30, 24, H.Hair, 0.0f, 70.0f);
+		G.Part(MeshKind::Sphere, 16.5f, 6, 103, 7, 6, 8, Color{ 90, 255, 130, 255 }, 1.0f);
+		G.Part(MeshKind::Sphere, 16.5f, -6, 103, 7, 6, 8, Color{ 90, 255, 130, 255 }, 1.0f);
+		// Glowing ecto-energy hands.
+		G.Part(MeshKind::Sphere, HandF(RA), 20, HandU(RA), 14, 14, 14, Color{ 110, 255, 140, 255 }, 1.0f);
+		G.Part(MeshKind::Sphere, HandF(LA), -20, HandU(LA), 14, 14, 14, Color{ 110, 255, 140, 255 }, 1.0f);
+		if (P.Flying)
+		{
+			// Ghost tail replaces the legs in flight.
+			const float Sway = std::sin(Time * 5.0f) * 12.0f;
+			G.Part(MeshKind::Cone, -4, 0, 24, 30, 26, 54, Color{ 30, 30, 36, 255 }, 0.0f, 180.0f + Sway);
+			G.Part(MeshKind::Cone, -14 - Sway * 0.5f, 0, -8, 18, 16, 32, Color{ 120, 255, 200, 255 }, 0.7f, 200.0f + Sway * 1.5f);
+		}
 		break;
 	}
 	case HeroId::Jake:
 		if (P.Flying)
 		{
-			// American Dragon form.
-			const Color Red = Tint(Color{ 205, 40, 40, 255 });
-			const float Flap = std::sin(Time * 9.0f) * 35.0f;
-			G.Part(MeshKind::Cube, 0, 0, 60, 70, 34, 34, Red);
-			G.Part(MeshKind::Cube, 0, 0, 52, 60, 24, 14, Tint(Color{ 250, 200, 80, 255 }));
-			G.Part(MeshKind::Cube, 44, 0, 74, 34, 26, 26, Red);
-			G.Part(MeshKind::Cube, 64, 0, 70, 18, 18, 14, Red);
-			G.Part(MeshKind::Cone, 40, 8, 92, 8, 8, 18, Color{ 250, 220, 120, 255 });
-			G.Part(MeshKind::Cone, 40, -8, 92, 8, 8, 18, Color{ 250, 220, 120, 255 });
-			G.Part(MeshKind::Cube, 0, 50, 76, 50, 70, 4, Tint(Color{ 40, 170, 90, 255 }), 0.0f, 0.0f, 0.0f, -Flap);
-			G.Part(MeshKind::Cube, 0, -50, 76, 50, 70, 4, Tint(Color{ 40, 170, 90, 255 }), 0.0f, 0.0f, 0.0f, Flap);
-			G.Part(MeshKind::Cone, -58, 0, 56, 18, 18, 60, Red, 0.0f, 100.0f);
-			G.Part(MeshKind::Sphere, 58, 7, 80, 6, 6, 6, Color{ 255, 230, 80, 255 }, 1.0f);
-			G.Part(MeshKind::Sphere, 58, -7, 80, 6, 6, 6, Color{ 255, 230, 80, 255 }, 1.0f);
+			// American Dragon form: red with yellow belly and big wings.
+			Rig D = G;
+			D.Scale = P.H / 70.0f * 1.5f;
+			const Color Red = Tint(Color{ 205, 35, 30, 255 }), Belly{ 245, 200, 70, 255 }, Wing{ 150, 25, 25, 255 };
+			const float Flap = std::sin(Time * 8.0f) * 35.0f;
+			D.Part(MeshKind::Cube, 0, 0, 50, 70, 34, 34, Red);
+			D.Part(MeshKind::Cube, 2, 0, 42, 60, 26, 14, Belly);
+			D.Part(MeshKind::Cube, 42, 0, 64, 30, 22, 30, Red, 0.0f, -20.0f);
+			D.Part(MeshKind::Cube, 60, 0, 74, 30, 24, 22, Red);
+			D.Part(MeshKind::Cube, 76, 0, 70, 18, 18, 12, Red);
+			D.Part(MeshKind::Cone, 54, 9, 92, 7, 7, 20, Color{ 250, 225, 150, 255 }, 0.0f, 30.0f);
+			D.Part(MeshKind::Cone, 54, -9, 92, 7, 7, 20, Color{ 250, 225, 150, 255 }, 0.0f, 30.0f);
+			D.Part(MeshKind::Sphere, 70, 9, 80, 6, 6, 6, Color{ 255, 230, 80, 255 }, 1.0f);
+			D.Part(MeshKind::Sphere, 70, -9, 80, 6, 6, 6, Color{ 255, 230, 80, 255 }, 1.0f);
+			for (int s = -1; s <= 1; s += 2)
+			{
+				const float F = s * Flap;
+				D.Part(MeshKind::Cube, 4, s * 42.0f, 62 + std::sin(F * Deg2Rad) * 20, 50, 60, 4, Wing, 0.0f, 0.0f, 0.0f, -F);
+				D.Part(MeshKind::Cube, -6, s * 92.0f, 62 + std::sin(F * Deg2Rad) * 60, 40, 50, 3, Wing, 0.0f, 0.0f, 0.0f, -F * 1.3f);
+				D.Limb(10, s * 12.0f, 38, 9, 22, -40, Red);
+			}
+			for (int k = 0; k < 3; ++k)
+			{
+				D.Part(MeshKind::Cone, -48 - k * 26, 0, 46 - k * 4, 22 - k * 6, 22 - k * 6, 34, Red, 0.0f, 100.0f + std::sin(Time * 4 + k) * 10.0f);
+			}
 		}
 		else
 		{
-			Humanoid(G, Skin, Shirt, Pants, Color{ 240, 240, 240, 255 }, Swing, ArmSwing);
-			for (int k = 0; k < 4; ++k)
+			Humanoid(G, Skin, Shirt, Pants, White, Leg, RA, LA);
+			G.Part(MeshKind::Cube, 10.5f, 0, 64, 2, 10, 36, Color{ 120, 120, 130, 255 }); // shirt under the jacket
+			G.Part(MeshKind::Sphere, -3, 0, 114, 38, 38, 22, H.Hair);
+			for (int k = 0; k < 5; ++k)
 			{
-				G.Part(MeshKind::Cone, -6 + k * 2, -9 + k * 6, 122, 12, 12, 22, k % 2 ? Color{ 80, 220, 120, 255 } : H.Hair, 0.0f, -15.0f);
+				G.Part(MeshKind::Cone, -8 + k * 2, -12 + k * 6, 124, 12, 12, 22, k % 2 ? Color{ 80, 220, 120, 255 } : H.Hair, 0.0f, -10.0f - k * 4.0f);
 			}
 		}
 		break;
 	case HeroId::XJ9:
 	{
-		const Color White = Shirt, Blue = Pants;
-		G.Limb(0, 8, 42, 11, 40, Swing, White);
-		G.Limb(0, -8, 42, 11, 40, -Swing, White);
-		G.Part(MeshKind::Cone, 0, 0, 40, 44, 44, 26, Blue, 0.0f, 180.0f);
-		G.Part(MeshKind::Cube, 0, 0, 64, 20, 26, 34, White);
-		G.Part(MeshKind::Cube, 0, 0, 72, 21, 27, 6, Blue);
-		G.Limb(0, 19, 78, 9, 36, -ArmSwing, White);
-		G.Limb(0, -19, 78, 9, 36, ArmSwing, White);
-		G.Part(MeshKind::Sphere, 0, 0, 100, 36, 34, 36, White);
-		G.Part(MeshKind::Cube, -2, 0, 116, 34, 34, 10, Blue);
-		G.Part(MeshKind::Cylinder, 0, 22, 104, 14, 12, 22, Blue, 0.0f, 0.0f, 0.0f, 90.0f);
-		G.Part(MeshKind::Cylinder, 0, -22, 104, 14, 12, 22, Blue, 0.0f, 0.0f, 0.0f, 90.0f);
-		G.Part(MeshKind::Sphere, 15, 6, 101, 7, 7, 9, Color{ 40, 120, 220, 255 }, 0.6f);
-		G.Part(MeshKind::Sphere, 15, -6, 101, 7, 7, 9, Color{ 40, 120, 220, 255 }, 0.6f);
+		const Color Body = Shirt, Teal{ 70, 190, 205, 255 }, Joint{ 60, 70, 95, 255 };
+		G.Limb(0, 8, 42, 10, 40, Leg, Body);
+		G.Limb(0, -8, 42, 10, 40, -Leg, Body);
+		G.Part(MeshKind::Sphere, std::sin(Leg * Deg2Rad) * 20, 8, 22, 11, 11, 11, Joint);
+		G.Part(MeshKind::Sphere, -std::sin(Leg * Deg2Rad) * 20, -8, 22, 11, 11, 11, Joint);
+		G.Part(MeshKind::Cone, 0, 0, 42, 44, 44, 26, Teal, 0.0f, 180.0f);
+		G.Part(MeshKind::Cube, 0, 0, 64, 20, 26, 34, Body);
+		G.Part(MeshKind::Cube, 0, 0, 74, 21, 27, 6, Teal);
+		G.Part(MeshKind::Sphere, 10.5f, 0, 64, 3, 7, 7, Teal, 0.5f);
+		G.Limb(0, 19, 78, 9, 36, RA, Body);
+		G.Limb(0, -19, 78, 9, 36, LA, Body);
+		// Forearm missile launchers.
+		G.Part(MeshKind::Cylinder, AlongF(RA, -10), 25, AlongU(RA, -10), 8, 8, 18, Color{ 225, 60, 50, 255 }, 0.0f, RA - 180.0f);
+		G.Part(MeshKind::Cylinder, AlongF(LA, -10), -25, AlongU(LA, -10), 8, 8, 18, Color{ 225, 60, 50, 255 }, 0.0f, LA - 180.0f);
+		G.Part(MeshKind::Sphere, 0, 0, 100, 38, 36, 38, Body);
+		G.Part(MeshKind::Cube, -2, 0, 119, 32, 36, 8, Teal);
+		G.Part(MeshKind::Cube, -2, 22, 120, 12, 34, 7, Teal, 0.0f, 0.0f, 0.0f, 35.0f);
+		G.Part(MeshKind::Cube, -2, -22, 120, 12, 34, 7, Teal, 0.0f, 0.0f, 0.0f, -35.0f);
+		G.Part(MeshKind::Sphere, 15, 7, 102, 9, 9, 11, Color{ 245, 248, 255, 255 });
+		G.Part(MeshKind::Sphere, 15, -7, 102, 9, 9, 11, Color{ 245, 248, 255, 255 });
+		G.Part(MeshKind::Sphere, 18, 7, 102, 5, 5, 6, Color{ 50, 130, 220, 255 }, 0.6f);
+		G.Part(MeshKind::Sphere, 18, -7, 102, 5, 5, 6, Color{ 50, 130, 220, 255 }, 0.6f);
 		if (P.Flying)
 		{
-			const float Fl = 20.0f + std::sin(Time * 40.0f) * 6.0f;
-			G.Part(MeshKind::Cone, 0, 8, -10, 14, 14, Fl, Color{ 255, 190, 60, 255 }, 1.0f, 180.0f);
-			G.Part(MeshKind::Cone, 0, -8, -10, 14, 14, Fl, Color{ 255, 190, 60, 255 }, 1.0f, 180.0f);
+			const float Fl = 26.0f + std::sin(Time * 40.0f) * 6.0f;
+			G.Part(MeshKind::Cone, 0, 8, -12, 16, 16, Fl, Color{ 255, 190, 60, 255 }, 1.0f, 180.0f);
+			G.Part(MeshKind::Cone, 0, -8, -12, 16, 16, Fl, Color{ 255, 190, 60, 255 }, 1.0f, 180.0f);
 		}
 		break;
 	}
 	case HeroId::ElTigre:
 	{
-		const Color Orange = Shirt, Black = Pants;
-		Humanoid(G, Orange, Orange, Black, Black, Swing, ArmSwing, true, 36.0f);
-		G.Part(MeshKind::Cube, 0, 0, 52, 21, 31, 6, Black);
-		G.Part(MeshKind::Cone, -2, 13, 120, 12, 12, 16, Orange);
-		G.Part(MeshKind::Cone, -2, -13, 120, 12, 12, 16, Orange);
-		G.Part(MeshKind::Cube, 15, 0, 104, 6, 26, 6, Black);   // mask stripe
-		G.Part(MeshKind::Sphere, 17, 0, 94, 14, 18, 10, Skin);  // jaw
-		G.Part(MeshKind::Cone, 8, 20, 40, 6, 6, 16, Color{ 220, 220, 235, 255 }, 0.0f, 160.0f);
-		G.Part(MeshKind::Cone, 8, -20, 40, 6, 6, 16, Color{ 220, 220, 235, 255 }, 0.0f, 160.0f);
+		const Color Suit{ 55, 40, 38, 255 }, Fur = Tint(Color{ 125, 78, 42, 255 }), Muzzle{ 235, 205, 155, 255 };
+		Humanoid(G, Fur, Tint(Suit), Tint(Color{ 85, 52, 32, 255 }), Color{ 30, 25, 25, 255 }, Leg, RA, LA, true, 38.0f);
+		G.Part(MeshKind::Cube, 0, 0, 84, 22, 32, 6, Color{ 200, 40, 40, 255 });   // red scarf
+		G.Part(MeshKind::Cube, 0, 0, 50, 21, 31, 6, Color{ 200, 40, 40, 255 });   // belt sash
+		G.Part(MeshKind::Sphere, 15, 0, 95, 16, 22, 12, Muzzle);
+		G.Part(MeshKind::Cube, 16, 0, 104, 6, 32, 9, Color{ 25, 20, 20, 255 });  // mask band
+		G.Part(MeshKind::Sphere, 18, 7, 104, 9, 9, 11, White);
+		G.Part(MeshKind::Sphere, 18, -7, 104, 9, 9, 11, White);
+		G.Part(MeshKind::Sphere, 21, 7, 104, 5, 5, 6, Color{ 70, 200, 90, 255 }, 0.4f);
+		G.Part(MeshKind::Sphere, 21, -7, 104, 5, 5, 6, Color{ 70, 200, 90, 255 }, 0.4f);
+		G.Part(MeshKind::Cone, -2, 13, 123, 13, 13, 18, Fur);
+		G.Part(MeshKind::Cone, -2, -13, 123, 13, 13, 18, Fur);
+		G.Part(MeshKind::Cone, 4, 20, 98, 10, 10, 18, White, 0.0f, 0.0f, 0.0f, 70.0f);
+		G.Part(MeshKind::Cone, 4, -20, 98, 10, 10, 18, White, 0.0f, 0.0f, 0.0f, -70.0f);
+		// Steel claws.
+		for (int k = -1; k <= 1; ++k)
+		{
+			G.Part(MeshKind::Cone, AlongF(RA, 12), 20 + k * 4.0f, AlongU(RA, 12), 5, 5, 22, Color{ 215, 220, 230, 255 }, 0.0f, RA - 180.0f);
+			G.Part(MeshKind::Cone, AlongF(LA, 12), -20 + k * 4.0f, AlongU(LA, 12), 5, 5, 22, Color{ 215, 220, 230, 255 }, 0.0f, LA - 180.0f);
+		}
 		break;
 	}
 	case HeroId::Ben:
-		Humanoid(G, Skin, Shirt, Pants, Color{ 40, 40, 40, 255 }, Swing, ArmSwing);
-		G.Part(MeshKind::Cube, 10.5f, 0, 64, 2, 8, 38, Color{ 30, 30, 30, 255 });
-		G.Part(MeshKind::Sphere, -3, 0, 112, 38, 38, 24, H.Hair);
-		G.Part(MeshKind::Cube, 0, -20, 48, 14, 14, 10, Color{ 40, 40, 40, 255 });
-		G.Part(MeshKind::Sphere, 0, -20, 48, 9, 9, 9, Color{ 90, 255, 90, 255 }, 1.0f); // Omnitrix
+	{
+		Humanoid(G, Skin, Shirt, Pants, Color{ 40, 40, 40, 255 }, Leg, RA, LA);
+		G.Part(MeshKind::Cube, 10.5f, 0, 64, 2, 9, 38, Color{ 30, 30, 30, 255 });
+		G.Part(MeshKind::Sphere, -3, 0, 113, 38, 38, 24, H.Hair);
+		G.Part(MeshKind::Cone, 12, 6, 114, 14, 22, 18, H.Hair, 0.0f, -70.0f);
+		// Omnitrix on the left wrist.
+		G.Part(MeshKind::Cylinder, AlongF(LA, -8), -20, AlongU(LA, -8), 14, 14, 10, Color{ 35, 35, 40, 255 }, 0.0f, LA - 180.0f);
+		G.Part(MeshKind::Sphere, AlongF(LA, -8) + 4, -20, AlongU(LA, -8) + 3, 9, 9, 9, Color{ 90, 255, 90, 255 }, 1.0f);
 		break;
+	}
 	case HeroId::Aang:
 	{
-		Humanoid(G, Skin, Shirt, Pants, Color{ 120, 80, 50, 255 }, Swing, ArmSwing);
-		G.Part(MeshKind::Cube, -4, 0, 58, 24, 34, 30, Pants);                     // robe
-		G.Part(MeshKind::Cube, 4, 0, 119, 26, 6, 4, Color{ 70, 160, 240, 255 });   // arrow
-		G.Part(MeshKind::Cube, 17, 0, 110, 6, 6, 10, Color{ 70, 160, 240, 255 });
+		const Color Orange{ 230, 110, 40, 255 }, Yellow = Shirt, Brown{ 140, 95, 55, 255 };
+		Humanoid(G, Skin, Yellow, Pants, Color{ 120, 80, 50, 255 }, Leg, RA, LA);
+		G.Part(MeshKind::Cube, -2, 0, 70, 24, 34, 26, Tint(Orange));             // orange top / cape
+		G.Part(MeshKind::Cube, 0, 0, 50, 22, 32, 8, Tint(Orange));
+		G.Part(MeshKind::Cube, 4, 0, 119, 28, 6, 4, Color{ 70, 160, 240, 255 }); // arrow
+		G.Part(MeshKind::Cube, 18, 0, 110, 6, 6, 12, Color{ 70, 160, 240, 255 });
 		if (P.Gliding)
 		{
-			G.Part(MeshKind::Cube, 0, 0, 150, 60, 130, 4, Pants);
-			G.Part(MeshKind::Cylinder, 0, 0, 150, 6, 6, 150, Color{ 140, 95, 55, 255 }, 0.0f, 90.0f);
+			G.Part(MeshKind::Cube, 0, 0, 150, 60, 130, 4, Orange);
+			G.Part(MeshKind::Cylinder, 0, 0, 150, 6, 6, 150, Brown, 0.0f, 90.0f);
 		}
 		else
 		{
-			G.Part(MeshKind::Cylinder, 8, 28, 70, 6, 6, 150, Color{ 140, 95, 55, 255 });
+			// Glider staff held across the body.
+			G.Part(MeshKind::Cylinder, HandF(RA) + 4, 4, HandU(RA) + 6, 6, 6, 160, Brown, 0.0f, 0.0f, 0.0f, 75.0f);
 		}
 		if (P.ScooterTime > 0.0f)
 		{
-			G.Part(MeshKind::Sphere, 0, 0, -10, 70, 70, 50, Color{ 230, 245, 255, 255 }, 0.5f, Time * 500.0f);
+			G.Part(MeshKind::Sphere, 0, 0, -12, 74, 74, 54, Color{ 170, 210, 255, 255 }, 0.5f, Time * 500.0f);
 		}
 		break;
 	}
 	default:
-		Humanoid(G, Skin, Shirt, Pants, Color{ 40, 40, 40, 255 }, Swing, ArmSwing);
+		Humanoid(G, Skin, Shirt, Pants, Color{ 40, 40, 40, 255 }, Leg, RA, LA);
 		break;
 	}
 }

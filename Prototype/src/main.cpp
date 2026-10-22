@@ -9,6 +9,8 @@
 
 #include "raylib.h"
 #include "rlgl.h"
+#define GLFW_INCLUDE_NONE
+#include "GLFW/glfw3.h" // compiled into raylib (rglfw.c)
 
 #include <cmath>
 #include <cstdio>
@@ -52,6 +54,35 @@ namespace
 #if defined(_WIN32)
 		MessageBoxA(nullptr, Message.c_str(), "Multiverse Toons", 0x10 /* MB_ICONERROR */);
 #endif
+	}
+
+	std::string GlfwError;
+
+	// raylib 5.0 keeps going after a failed window init and crashes in its GL
+	// setup, so probe for an OpenGL 3.3 core context with a hidden window first.
+	bool CanCreateGL33Context()
+	{
+		glfwSetErrorCallback([](int, const char* Description) { GlfwError = Description ? Description : ""; });
+		if (!glfwInit())
+		{
+			return false;
+		}
+		glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#if defined(__APPLE__)
+		glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+#endif
+		GLFWwindow* Probe = glfwCreateWindow(64, 64, "probe", nullptr, nullptr);
+		const bool bOk = Probe != nullptr;
+		if (Probe)
+		{
+			glfwDestroyWindow(Probe);
+		}
+		glfwTerminate();
+		glfwSetErrorCallback(nullptr);
+		return bOk;
 	}
 
 	void MakeDir(const std::string& Path)
@@ -131,6 +162,7 @@ namespace
 		In.DebugSpawn = IsKeyPressed(KEY_F5);
 		In.DebugMeter = IsKeyPressed(KEY_F6);
 		In.DebugNextHero = IsKeyPressed(KEY_F7);
+		In.ToggleArt = IsKeyPressed(KEY_M);
 		return In;
 	}
 
@@ -227,7 +259,7 @@ namespace
 			for (int i = 0; i < 5; ++i)
 			{
 				const float Base = 24.5f + i * 2.0f;
-				if (Once(Base)) { G.SelectHero(Others[i]); G.SpawnEnemiesNearPlayer(3); G.SetCameraAngles(60.0f + i * 50.0f, -12.0f); }
+				if (Once(Base)) { G.ClearEnemies(); G.SelectHero(Others[i]); G.SpawnEnemiesNearPlayer(3); G.SetCameraAngles(60.0f + i * 50.0f, -12.0f); }
 				if (Once(Base + 0.2f)) { In.Traversal = true; In.Sig = true; }
 				if (During(Base + 0.3f, Base + 1.5f)) { In.MoveY = 0.6f; In.AttackHeld = true; In.Attack = true; In.SigHeld = true; In.JumpHeld = i == 1; }
 				if (Once(Base + 1.4f)) Shot = Names[i];
@@ -237,9 +269,26 @@ namespace
 			if (Once(35.0f)) { In.Recall = true; }
 			if (Once(35.3f)) { Check(G.CurrentLevel() == 0, "recall to Nexus"); G.SetCameraAngles(20.0f, -25.0f); }
 			if (Once(35.8f)) Shot = "14_nexus_overview";
+			if (Once(36.0f)) G.TeleportPlayer(Vector3{ 3650.0f, 0.0f, 120.0f }, 0.0f);
+			if (Once(36.3f)) In.Interact = true;
+			if (Once(36.6f)) { Check(G.IsTerminalOpen(), "terminal menu opens"); Shot = "15_terminal_menu"; }
+			if (Once(36.9f)) In.Back = true;
+
+			// --- Aang's earth pillar (away from enemies) -----------------------
+			if (Once(37.2f)) { G.SelectHero(HeroId::Aang); G.TeleportPlayer(Vector3{ -2600.0f, -1200.0f, 120.0f }, 0.0f); }
+			if (Once(37.6f)) In.Sig2 = true;
+			if (Once(37.8f)) Check(G.PillarCount() > 0, "Aang raises an earth pillar");
+			if (Once(38.6f)) G.SetCameraAngles(30.0f, -28.0f);
+			if (Once(39.0f)) Shot = "16_aang_earth_pillar";
+
+			// --- Art style toggle --------------------------------------------
+			if (Once(39.1f)) { Check(G.HasSprite(HeroId::Aang), "concept-art sprites loaded"); In.ToggleArt = true; }
+			if (Once(39.3f)) { Check(!G.SpriteArtEnabled(), "M switches to 3D models"); Shot = "17_aang_3d_mode"; }
+			if (Once(39.5f)) In.ToggleArt = true;
+			if (Once(39.7f)) Check(G.SpriteArtEnabled(), "M switches back to cut-outs");
 
 			if (!G.PlayerIsValid()) { Check(false, "player state is finite"); return false; }
-			return T < 36.5f;
+			return T < 40.0f;
 		}
 
 		void Check(bool bOk, const char* What)
@@ -289,6 +338,12 @@ int main(int Argc, char** Argv)
 	}
 #endif
 	SetTraceLogLevel(Opt.SmokeTest ? LOG_WARNING : LOG_INFO);
+	if (!CanCreateGL33Context())
+	{
+		Fatal("Multiverse Toons needs an OpenGL 3.3 capable graphics driver, and none was found.\n"
+		      "Please update your graphics driver and try again.\n\n(" + GlfwError + ")");
+		return 1;
+	}
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | (Opt.SmokeTest ? 0 : FLAG_VSYNC_HINT));
 	const int W = Opt.Width > 0 ? Opt.Width : 1600;
 	const int H = Opt.Height > 0 ? Opt.Height : 900;
@@ -419,6 +474,7 @@ int main(int Argc, char** Argv)
 	}
 
 	if (LogFile) std::fclose(LogFile);
+	G.Shutdown();
 	R.Shutdown();
 	CloseWindow();
 	return Exit;
