@@ -8,6 +8,24 @@ from the Nexus Observatory.
 - **Architecture, world scale, system specs, status:** [docs/TECH_DESIGN.md](docs/TECH_DESIGN.md)
 - **Cel-shading and per-show line art:** [docs/RENDERING.md](docs/RENDERING.md)
 
+## Play the prototype (Linux)
+
+Download [`Builds/MultiverseToons-Prototype-0.1-linux-x86_64.tar.gz`](Builds/), then:
+
+```bash
+tar xzf MultiverseToons-Prototype-0.1-linux-x86_64.tar.gz
+cd MultiverseToons-Prototype-0.1-linux-x86_64
+./play.sh
+```
+
+It's a greybox build (blocky stand-in art) with all 8 heroes, the Nexus Observatory, the
+Retroville slice, the hover car, Danny's phasing, the Omnitrix, rift patrols and gate courses.
+It runs on any x86_64 distro with glibc 2.28+ and OpenGL 3.3. Controls are in the bundled
+`README.txt` (press F1 in game). The prototype lives in `Prototype/` (C++17 + raylib). It plays
+the same JSON greybox layouts and uses the same `OmnitrixStateMachine.h` / `HoverMath.h` as the
+Unreal project. Rebuild with `Prototype/tools/package.sh`; CI rebuilds and smoke-tests it on
+every push.
+
 ## What's here
 
 | Area | Contents |
@@ -15,6 +33,7 @@ from the Nexus Observatory.
 | `Source/MultiverseToons` | Hero base class, ability loadout, Danny's ghost flight + intangibility, Jimmy's hover car, Ben's Omnitrix, Nexus terminals and hero swapping |
 | `Plugins/ToonRender` | Cel-shade lighting quantization and Sobel outline HLSL with per-universe line styles driven by custom stencil |
 | `Content/Python/greybox` | JSON blockouts for the Nexus Observatory and the 1 km² Retroville slice, plus an editor script that builds them |
+| `Prototype/` | Playable Linux greybox build (raylib) sharing the engine-independent rules and layouts |
 | `Tools/` | Tests for the engine-independent logic (Omnitrix rules, hover physics, layout validation) |
 
 ## Quick start

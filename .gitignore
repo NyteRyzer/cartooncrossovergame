@@ -23,3 +23,8 @@ Tools/tests/bin/
 # Python
 __pycache__/
 *.pyc
+
+# Prototype build output
+Prototype/build/
+Prototype/build-portable/
+smoke-test-shots/

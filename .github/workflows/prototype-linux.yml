@@ -1,0 +1,31 @@
+name: Prototype Linux build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl-dev xvfb libgl1-mesa-dri
+          pip install ziglang
+      - name: Build portable package
+        run: Prototype/tools/package.sh
+      - name: Smoke test (software OpenGL)
+        run: |
+          cd Prototype/build-portable/stage/MultiverseToons-Prototype-*-linux-x86_64
+          xvfb-run -a -s "-screen 0 1280x720x24" ./MultiverseToons --smoke-test --size 1280x720
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MultiverseToons-Prototype-linux-x86_64
+          path: Builds/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-shots
+          path: Prototype/build-portable/stage/*/smoke-test-shots
