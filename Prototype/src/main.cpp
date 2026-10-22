@@ -12,12 +12,57 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
+#include <cstdarg>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#include <direct.h>
+// Avoid <windows.h>: its names clash with raylib's (CloseWindow, DrawText...).
+extern "C" __declspec(dllimport) int __stdcall AttachConsole(unsigned long ProcessId);
+extern "C" __declspec(dllimport) int __stdcall MessageBoxA(void* Wnd, const char* Text, const char* Caption, unsigned int Type);
+#endif
 
 namespace
 {
+	FILE* LogFile = nullptr;
+
+	// Smoke-test output goes to stdout and to <shots>/smoke-test.log (Windows
+	// GUI builds and double-clicked apps have no visible console).
+	void Log(const char* Fmt, ...)
+	{
+		va_list Args;
+		va_start(Args, Fmt);
+		std::vprintf(Fmt, Args);
+		va_end(Args);
+		std::fflush(stdout);
+		if (LogFile)
+		{
+			va_start(Args, Fmt);
+			std::vfprintf(LogFile, Fmt, Args);
+			va_end(Args);
+			std::fflush(LogFile);
+		}
+	}
+
+	void Fatal(const std::string& Message)
+	{
+		std::fprintf(stderr, "%s\n", Message.c_str());
+#if defined(_WIN32)
+		MessageBoxA(nullptr, Message.c_str(), "Multiverse Toons", 0x10 /* MB_ICONERROR */);
+#endif
+	}
+
+	void MakeDir(const std::string& Path)
+	{
+#if defined(_WIN32)
+		_mkdir(Path.c_str());
+#else
+		mkdir(Path.c_str(), 0755);
+#endif
+	}
+
 	struct Options
 	{
 		bool SmokeTest = false;
@@ -37,7 +82,8 @@ namespace
 	{
 		if (!Override.empty()) return Override;
 		const std::string App = GetApplicationDirectory();
-		const std::string Candidates[] = { App + "data", App + "../data", "data", "../data" };
+		// ../Resources/data is the macOS .app bundle layout.
+		const std::string Candidates[] = { App + "data", App + "../Resources/data", App + "../data", "data", "../data" };
 		for (const std::string& C : Candidates)
 		{
 			if (FileExists(C + "/levels/nexus_observatory.lvl")) return C;
@@ -122,7 +168,7 @@ namespace
 				if (Car)
 				{
 					const float Speed = std::sqrt(Car->Vel.x * Car->Vel.x + Car->Vel.y * Car->Vel.y);
-					std::printf("  hover car: speed %.0f cm/s, cruise altitude %.0f cm\n", Speed, Car->CruiseAltitude);
+					Log("  hover car: speed %.0f cm/s, cruise altitude %.0f cm\n", Speed, Car->CruiseAltitude);
 					Check(Speed > 800.0f, "hover car accelerates");
 					Check(Car->CruiseAltitude > 300.0f, "hover car lift raises altitude");
 				}
@@ -198,7 +244,7 @@ namespace
 
 		void Check(bool bOk, const char* What)
 		{
-			std::printf("  [%s] %s\n", bOk ? " ok " : "FAIL", What);
+			Log("  [%s] %s\n", bOk ? " ok " : "FAIL", What);
 			Failures += bOk ? 0 : 1;
 		}
 
@@ -218,7 +264,16 @@ int main(int Argc, char** Argv)
 		else if (A == "--fullscreen") Opt.Fullscreen = true;
 		else if (A == "--shots" && i + 1 < Argc) Opt.ShotDir = Argv[++i];
 		else if (A == "--data" && i + 1 < Argc) Opt.DataDir = Argv[++i];
-		else if (A == "--size" && i + 1 < Argc) std::sscanf(Argv[++i], "%dx%d", &Opt.Width, &Opt.Height);
+		else if (A == "--size" && i + 1 < Argc)
+		{
+			const std::string V = Argv[++i];
+			const size_t X = V.find('x');
+			if (X != std::string::npos)
+			{
+				Opt.Width = static_cast<int>(std::strtod(V.substr(0, X).c_str(), nullptr));
+				Opt.Height = static_cast<int>(std::strtod(V.substr(X + 1).c_str(), nullptr));
+			}
+		}
 		else if (A == "--help" || A == "-h")
 		{
 			std::printf("Usage: %s [--fullscreen] [--size WxH] [--smoke-test [--shots DIR]] [--data DIR]\n", Argv[0]);
@@ -226,6 +281,13 @@ int main(int Argc, char** Argv)
 		}
 	}
 
+#if defined(_WIN32)
+	if (Opt.SmokeTest && AttachConsole(static_cast<unsigned long>(-1)))
+	{
+		std::freopen("CONOUT$", "w", stdout);
+		std::freopen("CONOUT$", "w", stderr);
+	}
+#endif
 	SetTraceLogLevel(Opt.SmokeTest ? LOG_WARNING : LOG_INFO);
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | (Opt.SmokeTest ? 0 : FLAG_VSYNC_HINT));
 	const int W = Opt.Width > 0 ? Opt.Width : 1600;
@@ -233,7 +295,7 @@ int main(int Argc, char** Argv)
 	InitWindow(W, H, "Multiverse Toons - Prototype Build 0.1");
 	if (!IsWindowReady())
 	{
-		std::fprintf(stderr, "Could not open a window (is a display / OpenGL 3.3 driver available?)\n");
+		Fatal("Could not open a window. An OpenGL 3.3 capable graphics driver is required.");
 		return 1;
 	}
 	SetExitKey(KEY_NULL);
@@ -253,7 +315,7 @@ int main(int Argc, char** Argv)
 	std::string Error;
 	if (!G.Init(DataDir, Error))
 	{
-		std::fprintf(stderr, "Failed to load game data: %s\n", Error.c_str());
+		Fatal("Failed to load game data: " + Error + "\nKeep the 'data' folder next to the game.");
 		CloseWindow();
 		return 1;
 	}
@@ -261,7 +323,7 @@ int main(int Argc, char** Argv)
 	ToonRenderer R;
 	if (!R.Init(GetRenderWidth(), GetRenderHeight()))
 	{
-		std::fprintf(stderr, "Failed to initialise the toon renderer (needs OpenGL 3.3)\n");
+		Fatal("Failed to initialise the renderer. An OpenGL 3.3 capable graphics driver is required.");
 		CloseWindow();
 		return 1;
 	}
@@ -269,8 +331,9 @@ int main(int Argc, char** Argv)
 	SmokeTest Smoke(Opt.ShotDir);
 	if (Opt.SmokeTest)
 	{
-		mkdir(Opt.ShotDir.c_str(), 0755);
-		std::printf("Smoke test: data=%s shots=%s\n", DataDir.c_str(), Opt.ShotDir.c_str());
+		MakeDir(Opt.ShotDir);
+		LogFile = std::fopen((Opt.ShotDir + "/smoke-test.log").c_str(), "w");
+		Log("Smoke test: data=%s shots=%s\n", DataDir.c_str(), Opt.ShotDir.c_str());
 	}
 
 	bool bCursorLocked = false;
@@ -333,7 +396,7 @@ int main(int Argc, char** Argv)
 			const std::string Path = Opt.ShotDir + "/" + Smoke.Shot + ".png";
 			ExportImage(Img, Path.c_str());
 			UnloadImage(Img);
-			std::printf("  screenshot %s\n", Path.c_str());
+			Log("  screenshot %s\n", Path.c_str());
 		}
 		EndDrawing();
 		RenderMs += (GetTime() - T0) * 1000.0;
@@ -345,16 +408,17 @@ int main(int Argc, char** Argv)
 	int Exit = 0;
 	if (Opt.SmokeTest)
 	{
-		std::printf("Smoke test: %d frames, %.1f ms avg render, %d enemies defeated, %d failure(s)\n",
+		Log("Smoke test: %d frames, %.1f ms avg render, %d enemies defeated, %d failure(s)\n",
 		            Frames, Frames ? RenderMs / Frames : 0.0, G.KillCount(), Smoke.Failures);
 		if (G.KillCount() == 0)
 		{
-			std::printf("  [FAIL] combat defeated at least one enemy\n");
+			Log("  [FAIL] combat defeated at least one enemy\n");
 			++Smoke.Failures;
 		}
 		Exit = Smoke.Failures == 0 ? 0 : 1;
 	}
 
+	if (LogFile) std::fclose(LogFile);
 	R.Shutdown();
 	CloseWindow();
 	return Exit;

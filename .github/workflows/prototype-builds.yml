@@ -1,0 +1,106 @@
+name: Prototype builds (Linux, Windows, macOS)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux-windows:
+    name: ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux, windows]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl-dev xvfb libgl1-mesa-dri
+          pip install ziglang
+      - name: Install Wine
+        if: matrix.platform == 'windows'
+        run: sudo apt-get install -y wine64
+      - name: Build and package
+        run: PLATFORM=${{ matrix.platform }} Prototype/tools/package.sh
+      - name: Smoke test
+        run: |
+          cd Prototype/build-portable/${{ matrix.platform }}/stage/MultiverseToons-Prototype-*
+          if [ "${{ matrix.platform }}" = windows ]; then
+            export WINEDEBUG=-all
+            xvfb-run -a -s "-screen 0 1280x720x24" wineboot -i
+            xvfb-run -a -s "-screen 0 1280x720x24" wine MultiverseToons.exe --smoke-test --size 1280x720 --shots smoke-test-shots || true
+            cat smoke-test-shots/smoke-test.log
+            grep -q " 0 failure(s)" smoke-test-shots/smoke-test.log
+          else
+            xvfb-run -a -s "-screen 0 1280x720x24" ./MultiverseToons --smoke-test --size 1280x720
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.platform }}
+          path: Builds/*
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-shots-${{ matrix.platform }}
+          path: Prototype/build-portable/${{ matrix.platform }}/stage/*/smoke-test-shots
+
+  macos:
+    name: macos
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and package (universal arm64 + x86_64)
+        run: PLATFORM=macos Prototype/tools/package.sh
+      - name: Verify bundle
+        run: |
+          APP="Prototype/build-portable/macos/Multiverse Toons.app"
+          lipo -info "$APP/Contents/MacOS/MultiverseToons"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ls "$APP/Contents/Resources/data/levels"
+      - name: Smoke test
+        # CI Macs are VMs; if their virtual GPU can't create a GL context this
+        # step reports it without failing the build.
+        continue-on-error: true
+        run: |
+          "Prototype/build-portable/macos/Multiverse Toons.app/Contents/MacOS/MultiverseToons" --smoke-test --size 1280x720 --shots "$PWD/mac-shots"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-macos
+          path: Builds/*
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-shots-macos
+          path: mac-shots
+
+  publish:
+    name: Publish downloads
+    needs: [linux-windows, macos]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/zealous-pasteur-7esj4t')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+      - name: Update the "prototype-latest" pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: prototype-latest
+          name: Multiverse Toons prototype (latest build)
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          body: |
+            Extract and play. Pick your platform:
+            - **Windows 10/11:** `...-windows-x64.zip` - extract, double-click `MultiverseToons.exe`
+            - **macOS 10.15+ (Apple Silicon + Intel):** `...-macos-universal.zip` - extract, right-click `Multiverse Toons.app` > Open
+            - **Linux x86_64:** `...-linux-x86_64.tar.gz` - extract, run `./play.sh`
+
+            Built from ${{ github.sha }}. Controls and troubleshooting are in README.txt inside each download.
+          files: dist/*

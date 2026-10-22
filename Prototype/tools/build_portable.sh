@@ -1,18 +1,39 @@
 #!/usr/bin/env bash
-# Builds a portable Linux x86_64 binary of the prototype with Zig's C/C++
-# toolchain, targeting glibc 2.28 so it runs on Ubuntu 20.04+, Debian 10+,
-# Fedora 29+, Arch, Mint, Pop!_OS, SteamOS, etc.
+# Builds a portable binary of the prototype with Zig's C/C++ toolchain.
 #
-# Needs: zig (or `pip install ziglang`), git, python3, and X11/GL development
-# headers (Debian/Ubuntu: libx11-dev libxrandr-dev libxi-dev libxcursor-dev
-# libxinerama-dev libgl-dev).
+#   PLATFORM=linux   (default) x86_64, glibc 2.28: Ubuntu 20.04+, Debian 10+,
+#                    Fedora 29+, Arch, Mint, Pop!_OS, SteamOS...
+#   PLATFORM=windows x86_64 Windows 7+ .exe, cross-compiled (no MSVC needed)
 #
-#   Prototype/tools/build_portable.sh [out_dir]
+# macOS needs Apple's SDK frameworks, so it is built natively by
+# tools/build_macos.sh on a Mac (CI does this on a macOS runner).
+#
+# Needs: zig (or `pip install ziglang`), git, python3. Linux builds also need
+# X11/GL development headers (Debian/Ubuntu: libx11-dev libxrandr-dev
+# libxi-dev libxcursor-dev libxinerama-dev libgl-dev).
+#
+#   PLATFORM=windows Prototype/tools/build_portable.sh [out_dir]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-OUT="${1:-$ROOT/Prototype/build-portable}"
-TARGET="${TARGET:-x86_64-linux-gnu.2.28}"
+PLATFORM="${PLATFORM:-linux}"
+OUT="${1:-$ROOT/Prototype/build-portable/$PLATFORM}"
+case "$PLATFORM" in
+	linux)
+		TARGET="${TARGET:-x86_64-linux-gnu.2.28}"
+		EXE="MultiverseToons"
+		# Zig's own libc headers win; system dirs are only consulted for X11/GL headers.
+		SYS_INC=(-idirafter /usr/include -idirafter /usr/include/x86_64-linux-gnu)
+		LIBS=(-lm -ldl -lpthread)
+		;;
+	windows)
+		TARGET="${TARGET:-x86_64-windows-gnu}"
+		EXE="MultiverseToons.exe"
+		SYS_INC=()
+		LIBS=(-lopengl32 -lgdi32 -lwinmm -luser32 -lshell32 -Wl,--subsystem,windows)
+		;;
+	*) echo "unknown PLATFORM=$PLATFORM" >&2; exit 2 ;;
+esac
 RAYLIB_TAG="5.0"
 RAYLIB_SRC="${RAYLIB_SRC:-$OUT/raylib}"
 
@@ -29,8 +50,6 @@ if [[ ! -f "$RAYLIB_SRC/src/raylib.h" ]]; then
 	git clone --quiet --depth 1 --branch "$RAYLIB_TAG" https://github.com/raysan5/raylib "$RAYLIB_SRC"
 fi
 
-# Zig's own libc headers win; system dirs are only consulted for X11/GL headers.
-SYS_INC=(-idirafter /usr/include -idirafter /usr/include/x86_64-linux-gnu)
 COMMON=(-target "$TARGET" -O2 -fno-sanitize=undefined "${SYS_INC[@]}")
 RL_DEFS=(-DPLATFORM_DESKTOP -DGRAPHICS_API_OPENGL_33 -D_GNU_SOURCE -DSUPPORT_MODULE_RAUDIO=0)
 
@@ -49,6 +68,7 @@ for f in main Game GameRender GameHud Render World; do
 done
 for p in "${pids[@]}"; do wait "$p"; done
 
-"${ZIGCMD[@]}" c++ -target "$TARGET" "$OUT"/obj/*.o -o "$OUT/MultiverseToons" -lm -ldl -lpthread -s
+"${ZIGCMD[@]}" c++ -target "$TARGET" "$OUT"/obj/*.o -o "$OUT/$EXE" "${LIBS[@]}" -s
+rm -f "$OUT"/*.pdb
 python3 -I "$ROOT/Prototype/tools/export_levels.py" "$OUT/data/levels" >/dev/null
-echo "Built $OUT/MultiverseToons ($TARGET)"
+echo "Built $OUT/$EXE ($TARGET)"

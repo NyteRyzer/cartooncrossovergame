@@ -1,19 +1,32 @@
-PROJECT MULTIVERSE TOONS - Prototype Build 0.1 (Linux x86_64)
-=============================================================
+PROJECT MULTIVERSE TOONS - Prototype Build @VERSION@
+====================================================
 
 HOW TO PLAY
-  tar xzf MultiverseToons-Prototype-0.1-linux-x86_64.tar.gz
-  cd MultiverseToons-Prototype-0.1-linux-x86_64
-  ./play.sh                    (or double-click MultiverseToons)
 
-  Options:  ./play.sh --fullscreen      ./play.sh --size 1280x720
+  WINDOWS 10 / 11
+    1. Right-click the .zip > Extract All.
+    2. Open the extracted folder and double-click MultiverseToons.exe.
+    If SmartScreen says "Windows protected your PC" (the game isn't signed
+    by a paid certificate): click "More info" > "Run anyway". Only needed once.
 
-REQUIREMENTS
-  - 64-bit Linux with glibc 2.28 or newer (Ubuntu 20.04+, Debian 10+,
-    Fedora 29+, Arch, Mint, Pop!_OS, SteamOS...). Works on X11 and on
-    Wayland through XWayland.
-  - A GPU driver with OpenGL 3.3 (anything from roughly 2010 onward).
-  - No install, no dependencies, nothing written outside this folder.
+  macOS 10.15 or newer (Apple Silicon and Intel)
+    1. Double-click the .zip to extract it.
+    2. Right-click "Multiverse Toons.app" > Open > Open.
+    The right-click is only needed the first time: the app isn't notarized
+    by Apple, so a plain double-click is blocked on first launch. If macOS
+    says the app "is damaged", run this once in Terminal and try again:
+        xattr -cr ~/Downloads/MultiverseToons-Prototype-*/"Multiverse Toons.app"
+    (adjust the path to wherever you extracted it).
+
+  LINUX (64-bit, glibc 2.28+: Ubuntu 20.04+, Debian 10+, Fedora 29+, Arch,
+  Mint, Pop!_OS, SteamOS...; X11 or Wayland via XWayland)
+    tar xzf MultiverseToons-Prototype-@VERSION@-linux-x86_64.tar.gz
+    cd MultiverseToons-Prototype-@VERSION@-linux-x86_64
+    ./play.sh
+
+  Any platform needs a graphics driver with OpenGL 3.3 (any GPU from roughly
+  2010 on). No install and no extra downloads; nothing is written outside the
+  game folder. Command-line options: --fullscreen   --size 1280x720
 
 WHAT'S IN THIS BUILD
   This is a greybox prototype: blocky stand-in art, but real mechanics.
@@ -59,12 +72,14 @@ CONTROLS
   Debug keys: F5 spawn enemies, F6 fill ultimate meter, F7 next hero.
 
 TROUBLESHOOTING
-  "Permission denied"   chmod +x play.sh MultiverseToons
-  Black window / GL error: update your GPU driver; check
-                        `glxinfo | grep "OpenGL version"` shows 3.3 or higher.
-  Self-check:           ./MultiverseToons --smoke-test
-                        plays through every system on its own, saves
-                        screenshots to ./smoke-test-shots, prints ok/FAIL.
+  Linux "Permission denied":   chmod +x play.sh MultiverseToons
+  Error about OpenGL 3.3 / black window: update your graphics driver.
+  Self-check (all platforms): run the game with --smoke-test, e.g.
+      Windows:  MultiverseToons.exe --smoke-test
+      macOS:    "Multiverse Toons.app/Contents/MacOS/MultiverseToons" --smoke-test --shots ~/Desktop/mt-shots
+      Linux:    ./MultiverseToons --smoke-test
+  It plays through every system on its own, saves screenshots and a
+  smoke-test.log (ok/FAIL lines) to the smoke-test-shots folder.
 
 All characters belong to their respective owners (Nickelodeon/Paramount,
 Cartoon Network/Warner Bros. Discovery, Disney). Non-commercial fan prototype.
