@@ -31,7 +31,9 @@ add_executable(MultiverseToons
   src/GameRender.cpp
   src/GameHud.cpp
   src/Render.cpp
-  src/World.cpp)
+  src/World.cpp
+  src/Dressing.cpp
+  src/GameCharacters.cpp)
 
 target_include_directories(MultiverseToons PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MultiverseToons/Public

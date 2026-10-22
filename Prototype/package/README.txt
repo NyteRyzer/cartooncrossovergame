@@ -29,9 +29,12 @@ HOW TO PLAY
   game folder. Command-line options: --fullscreen   --size 1280x720
 
 WHAT'S IN THIS BUILD
-  This is a greybox prototype: blocky stand-in 3D art (styled after the
-  production-bible concept sheet, whose portraits appear on the hero select
-  screen), but real mechanics.
+  This is an early prototype with real mechanics. The heroes are cel-shaded
+  3D models designed from the production-bible concept sheet: they wear their
+  sheet faces and are fully animated (walk/run cycles, idle breathing, jumps,
+  landings, flying, gliding, attacks, hit reactions). Press M to switch to
+  the hand-drawn cut-outs taken straight from the sheet. The sheet's
+  portraits appear on the hero cards and the terminal menu.
   It plays the same level layouts and runs the same Omnitrix and hover-car
   rules as the Unreal Engine project in this repository.
 
@@ -43,7 +46,10 @@ WHAT'S IN THIS BUILD
     - Scale gallery next to the start (jump-height test blocks).
 
   RETROVILLE (1 km x 1 km)
-    - Suburbs, the Neutron house, downtown towers, school, Retroland.
+    - Suburbs with lawns, fences, mailboxes and trees; roads with street
+      lamps; the Neutron house and lab with Jimmy's rocket; Lindbergh
+      Elementary with its school bus; the Candy Bar; the park and pond;
+      downtown towers with neon; Retroland (ferris wheel, coaster, carousel).
     - 3 Rift Patrols: get close to a purple rift, beat 3 waves to close it.
     - Hover Race: drive the car through the perimeter gates in order.
     - Press P to return to the Nexus.
@@ -70,6 +76,7 @@ CONTROLS
   Left click attack    Q signature ability    F ultimate
   Tab fly (flyers)     E interact             P return to Nexus
   F1 controls overlay  F11 fullscreen         Esc pause (X to quit)
+  M art style: 3D models / concept-sheet cut-outs
   Hover car: W/S throttle, A/D steer, Space/Ctrl altitude, Shift boost, E exit
 
   Debug keys: F5 spawn enemies, F6 fill ultimate meter, F7 next hero.

@@ -60,7 +60,7 @@ for f in rcore rshapes rtextures rtext utils rmodels rglfw; do
 		-c "$RAYLIB_SRC/src/$f.c" -o "$OUT/obj/rl_$f.o" &
 	pids+=($!)
 done
-for f in main Game GameRender GameHud Render World; do
+for f in main Game GameRender GameHud Render World Dressing GameCharacters; do
 	"${ZIGCMD[@]}" c++ "${COMMON[@]}" -std=c++17 -Wall -Wextra -Wno-missing-field-initializers \
 		-I "$RAYLIB_SRC/src" -I "$RAYLIB_SRC/src/external/glfw/include" -I "$ROOT/Source/MultiverseToons/Public" \
 		-c "$ROOT/Prototype/src/$f.cpp" -o "$OUT/obj/$f.o" &

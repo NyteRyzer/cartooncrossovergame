@@ -8,6 +8,8 @@
 #include "raymath.h"
 
 #include <cstdint>
+#include <map>
+#include <vector>
 
 enum class MeshKind : uint8_t { Cube, Cylinder, Sphere, Cone, Pyramid, Count };
 
@@ -45,6 +47,20 @@ public:
 	void DrawSprite(const Texture2D& Tex, Vector3 Feet, Vector3 Right, Vector3 ToCamera, float Width, float Height,
 	                float Roll, bool bFlip, Color Tint, float Flash, float LineWeight);
 
+	// One textured quad given three corners (bottom-left, bottom-right,
+	// top-left) in raylib space; used for posed cut-out puppet parts.
+	void DrawSpriteQuad(const Texture2D& Tex, Vector3 BL, Vector3 BR, Vector3 TL, Vector3 ToCamera,
+	                    Color Tint, float Flash, float LineWeight);
+
+	// Static world batching: non-moving geometry is merged into a few large
+	// vertex-coloured meshes (per 80 m cell) instead of one draw per piece.
+	void BeginStaticBatch();
+	void AddStatic(MeshKind Kind, const Matrix& Transform, Color Tint, float Emissive = 0.0f, float LineWeight = 1.2f);
+	void EndStaticBatch();
+	void DrawStatic(Vector3 CamPos, Vector3 CamForward, float MaxDistance);
+	void ClearStatic();
+	int StaticVertexCount() const { return StaticVerts; }
+
 	// Composites colour + outlines to the backbuffer (call between BeginDrawing/EndDrawing).
 	void Composite(const SceneLighting& Light);
 
@@ -76,6 +92,31 @@ private:
 	int LocLightDir = -1, LocAmbient = -1, LocFogColor = -1, LocFogDensity = -1, LocBands = -1;
 	int LocViewPos = -1, LocEmissive = -1, LocLineWeight = -1;
 	int LocNormalTex = -1, LocDepthTex = -1, LocTexel = -1, LocNearFar = -1, LocSkyTop = -1;
+
+	struct BatchBuild
+	{
+		std::vector<float> V, N, T2;
+		std::vector<unsigned char> C;
+	};
+	struct BatchChunk
+	{
+		Mesh M{};
+		Vector3 Center{};
+		float Radius = 0.0f;
+	};
+	struct CpuMesh
+	{
+		std::vector<float> V, N; // expanded triangles
+	};
+	CpuMesh LowPoly[static_cast<int>(MeshKind::Count)];
+	std::map<long long, BatchBuild> Building;
+	std::vector<BatchChunk> Chunks;
+	Shader BatchShader{};
+	Shader BatchNormalShader{};
+	Material BatchMaterial{};
+	Material BatchNormalMaterial{};
+	int LocBLightDir = -1, LocBAmbient = -1, LocBFogColor = -1, LocBFogDensity = -1, LocBBands = -1, LocBViewPos = -1;
+	int StaticVerts = 0;
 
 	RenderPass Pass = RenderPass::Color;
 	int W = 0, H = 0;

@@ -97,6 +97,7 @@ namespace
 	struct Options
 	{
 		bool SmokeTest = false;
+	bool AnimTest = false;
 		bool Fullscreen = false;
 		std::string ShotDir = "smoke-test-shots";
 		std::string DataDir;
@@ -282,10 +283,10 @@ namespace
 			if (Once(39.0f)) Shot = "16_aang_earth_pillar";
 
 			// --- Art style toggle --------------------------------------------
-			if (Once(39.1f)) { Check(G.HasSprite(HeroId::Aang), "concept-art sprites loaded"); In.ToggleArt = true; }
-			if (Once(39.3f)) { Check(!G.SpriteArtEnabled(), "M switches to 3D models"); Shot = "17_aang_3d_mode"; }
+			if (Once(39.1f)) { Check(G.HasSprite(HeroId::Aang) && !G.SpriteArtEnabled(), "3D models by default, cut-outs loaded"); In.ToggleArt = true; }
+			if (Once(39.3f)) { Check(G.SpriteArtEnabled(), "M switches to concept-art cut-outs"); Shot = "17_aang_cutout_mode"; }
 			if (Once(39.5f)) In.ToggleArt = true;
-			if (Once(39.7f)) Check(G.SpriteArtEnabled(), "M switches back to cut-outs");
+			if (Once(39.7f)) Check(!G.SpriteArtEnabled(), "M switches back to 3D models");
 
 			if (!G.PlayerIsValid()) { Check(false, "player state is finite"); return false; }
 			return T < 40.0f;
@@ -301,6 +302,54 @@ namespace
 		std::string ShotDir;
 		int Failures = 0;
 	};
+
+	// Films each hero's animations as numbered frames (anim_<hero>_<n>.png):
+	// idle, walk cycle, jump, attack, then flight/special.
+	class AnimTest
+	{
+	public:
+		bool Step(Game& G, float T, float PrevT, InputState& In)
+		{
+			In = InputState{};
+			Shot.clear();
+			const float Slot = 3.2f;
+			const int Hero = static_cast<int>(T / Slot);
+			if (Hero >= static_cast<int>(HeroId::Count) + 2) return false;
+			const float L = std::fmod(T, Slot), PL = std::fmod(PrevT, Slot);
+			auto Once = [&](float At) { return (PL < At || PrevT < 0.0f || static_cast<int>(PrevT / Slot) != Hero) && L >= At; };
+			const HeroId Id = static_cast<HeroId>(std::min(Hero, static_cast<int>(HeroId::Count) - 1));
+			if (PrevT < 0.0f) In.Help = true; // hide the controls overlay while filming
+			if (Once(0.0f))
+			{
+				if (G.CurrentLevel() != 1) G.TravelTo(1);
+				G.ClearEnemies();
+				G.SelectHero(Hero >= static_cast<int>(HeroId::Count) ? HeroId::Ben : Id);
+				G.TeleportPlayer(Vector3{ -36000.0f, -41500.0f, 120.0f }, 90.0f);
+				G.SetCameraAngles(270.0f, -8.0f); // in front of the hero, facing it
+			}
+			// Extra slots: Ben as Heatblast and as Four Arms.
+			if (Hero == static_cast<int>(HeroId::Count) && Once(0.1f)) In.Number = 1;
+			if (Hero == static_cast<int>(HeroId::Count) + 1 && Once(0.1f)) In.Number = 2;
+			// Walk toward the camera so face and cycle both read.
+			if (L > 0.9f && L < 2.0f) In.MoveY = -0.7f;
+			if (Once(2.05f)) In.Jump = true;
+			if (Once(2.6f)) In.Attack = true;
+			if (Once(2.85f)) In.Traversal = true;
+			if (L > 2.85f) In.JumpHeld = true;
+			char Buf[64];
+			const float Frames[] = { 0.5f, 1.2f, 1.32f, 1.44f, 1.56f, 1.68f, 2.2f, 2.68f, 3.15f };
+			for (int i = 0; i < 9; ++i)
+			{
+				if (Once(Frames[i]))
+				{
+					std::snprintf(Buf, sizeof(Buf), "anim_%02d_%d", Hero, i);
+					Shot = Buf;
+				}
+			}
+			return true;
+		}
+		std::string Shot;
+	};
 }
 
 int main(int Argc, char** Argv)
@@ -310,6 +359,7 @@ int main(int Argc, char** Argv)
 	{
 		const std::string A = Argv[i];
 		if (A == "--smoke-test") Opt.SmokeTest = true;
+		else if (A == "--anim-test") { Opt.SmokeTest = true; Opt.AnimTest = true; }
 		else if (A == "--fullscreen") Opt.Fullscreen = true;
 		else if (A == "--shots" && i + 1 < Argc) Opt.ShotDir = Argv[++i];
 		else if (A == "--data" && i + 1 < Argc) Opt.DataDir = Argv[++i];
@@ -384,6 +434,7 @@ int main(int Argc, char** Argv)
 	}
 
 	SmokeTest Smoke(Opt.ShotDir);
+	AnimTest Anim;
 	if (Opt.SmokeTest)
 	{
 		MakeDir(Opt.ShotDir);
@@ -412,7 +463,15 @@ int main(int Argc, char** Argv)
 			Dt = 1.0f / 30.0f;
 			const float Prev = SmokeTime;
 			SmokeTime += Dt;
-			bRunning = Smoke.Step(G, SmokeTime, Prev == 0.0f ? -1.0f : Prev, In);
+			if (Opt.AnimTest)
+			{
+				bRunning = Anim.Step(G, SmokeTime, Prev == 0.0f ? -1.0f : Prev, In);
+				Smoke.Shot = Anim.Shot;
+			}
+			else
+			{
+				bRunning = Smoke.Step(G, SmokeTime, Prev == 0.0f ? -1.0f : Prev, In);
+			}
 		}
 		else
 		{
@@ -465,7 +524,7 @@ int main(int Argc, char** Argv)
 	{
 		Log("Smoke test: %d frames, %.1f ms avg render, %d enemies defeated, %d failure(s)\n",
 		            Frames, Frames ? RenderMs / Frames : 0.0, G.KillCount(), Smoke.Failures);
-		if (G.KillCount() == 0)
+		if (!Opt.AnimTest && G.KillCount() == 0)
 		{
 			Log("  [FAIL] combat defeated at least one enemy\n");
 			++Smoke.Failures;

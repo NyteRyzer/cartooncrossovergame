@@ -1,8 +1,11 @@
 #include "Game.h"
 
+#include "Dressing.h"
 #include "Traversal/HoverMath.h"
 
 #include <algorithm>
+#include <fstream>
+#include <sstream>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -154,6 +157,7 @@ bool Game::Init(const std::string& DataDir, std::string& Error)
 				B.RoofHeight = std::min(B.Size.x, B.Size.y) * 0.45f;
 			}
 		}
+		DressLevel(L, static_cast<int>(Levels.size()));
 		Levels.push_back(std::move(L));
 	}
 
@@ -194,6 +198,39 @@ bool Game::Init(const std::string& DataDir, std::string& Error)
 			Sprites[i].Tex = LoadTexture(Path.c_str());
 			SetTextureFilter(Sprites[i].Tex, TEXTURE_FILTER_BILINEAR);
 		}
+		const std::string FacePath = DataDir + "/sprites/faces/" + SpriteFiles[i].Name + ".png";
+		if (FileExists(FacePath.c_str()))
+		{
+			Faces[i] = LoadTexture(FacePath.c_str());
+			SetTextureFilter(Faces[i], TEXTURE_FILTER_BILINEAR);
+		}
+		// Puppet rig: <name>/rig.txt lists the parts and their pivots.
+		const std::string RigDir = DataDir + "/sprites/" + SpriteFiles[i].Name + "/";
+		std::ifstream Rig(RigDir + "rig.txt");
+		std::string Line;
+		while (Rig && std::getline(Rig, Line))
+		{
+			std::istringstream In(Line);
+			std::string Kind;
+			In >> Kind;
+			if (Kind == "sprite")
+			{
+				In >> Sprites[i].RigW >> Sprites[i].RigH;
+			}
+			else if (Kind == "part")
+			{
+				RigPart Part;
+				In >> Part.Name >> Part.X >> Part.Y >> Part.W >> Part.H >> Part.PX >> Part.PY >> Part.Z;
+				const std::string PartPath = RigDir + Part.Name + ".png";
+				if (In && FileExists(PartPath.c_str()))
+				{
+					Part.Tex = LoadTexture(PartPath.c_str());
+					SetTextureFilter(Part.Tex, TEXTURE_FILTER_BILINEAR);
+					Sprites[i].Parts.push_back(Part);
+				}
+			}
+		}
+		std::stable_sort(Sprites[i].Parts.begin(), Sprites[i].Parts.end(), [](const RigPart& A, const RigPart& B) { return A.Z < B.Z; });
 	}
 
 	P.Omni = Omnitrix::FStateMachine(OmnitrixConfig());
@@ -211,10 +248,20 @@ void Game::Shutdown()
 		if (T.id != 0) UnloadTexture(T);
 		T = Texture2D{};
 	}
+	for (Texture2D& F : Faces)
+	{
+		if (F.id != 0) UnloadTexture(F);
+		F = Texture2D{};
+	}
 	for (SpriteArt& S : Sprites)
 	{
 		if (S.Tex.id != 0) UnloadTexture(S.Tex);
 		S.Tex = Texture2D{};
+		for (RigPart& Part : S.Parts)
+		{
+			if (Part.Tex.id != 0) UnloadTexture(Part.Tex);
+		}
+		S.Parts.clear();
 	}
 }
 
@@ -537,7 +584,7 @@ void Game::Update(float Dt, const InputState& RawIn)
 		if (In.ToggleArt)
 		{
 			bSpriteArt = !bSpriteArt;
-			Say(bSpriteArt ? "Art style: concept-art cut-outs" : "Art style: 3D blockout models", Color{ 200, 220, 255, 255 }, 2.0f);
+			Say(bSpriteArt ? "Art style: concept-art cut-outs" : "Art style: 3D models", Color{ 200, 220, 255, 255 }, 2.0f);
 		}
 		if (In.DebugNextHero)
 		{

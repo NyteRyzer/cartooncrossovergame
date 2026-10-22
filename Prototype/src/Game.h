@@ -286,6 +286,7 @@ private:
 	// Rendering
 	void RenderScene(ToonRenderer& R, bool bTranslucent);
 	void RenderBlocks(ToonRenderer& R, bool bTranslucent);
+	void BuildStaticBatch(ToonRenderer& R);
 	void RenderGate(ToonRenderer& R, const Block& B, Color Tint, float Emissive);
 	void RenderHero(ToonRenderer& R, bool bTranslucent);
 	void RenderCar(ToonRenderer& R, const HoverCar& Car);
@@ -293,11 +294,13 @@ private:
 	void RenderShadow(ToonRenderer& R, Vector3 Pos, float Radius);
 	void RenderGoddard(ToonRenderer& R);
 	bool RenderHeroSprite(ToonRenderer& R, unsigned char Alpha, bool bHurt);
+	void RenderHero3D(ToonRenderer& R, unsigned char Alpha, bool bHurt);
 	void UpdateGoddard(float Dt);
 	void UpdatePillars(float Dt);
 
 	std::vector<Level> Levels;
 	int LevelIndex = 0;
+	int BatchLevel = -1;
 
 	PlayerState P;
 	std::vector<HoverCar> Cars;
@@ -350,11 +353,32 @@ private:
 	// Full-body cut-outs from the same sheet (tools/make_sprites.py), drawn as
 	// camera-facing "paper doll" sprites. Indices 0-7 follow HeroId.
 	enum SpriteId { SprHeatblast = static_cast<int>(HeroId::Count), SprFourArms, SprDragon, SprFairies, SprCount };
+	// A cut-out split into posable parts (tools/make_sprites.py RIGS).
+	struct RigPart
+	{
+		std::string Name;
+		Texture2D Tex{};
+		float X = 0, Y = 0, W = 0, H = 0;   // sprite pixels
+		float PX = 0, PY = 0;               // pivot, sprite pixels
+		int Z = 0;
+	};
 	struct SpriteArt
 	{
 		Texture2D Tex{};
 		float HeightCm = 150.0f;
+		float RigW = 0.0f, RigH = 0.0f;
+		std::vector<RigPart> Parts;         // sorted by Z; empty = draw the whole sprite
 	};
+	// Joint angles (degrees, counter-clockwise as seen) and offsets for one frame.
+	struct Pose
+	{
+		float ArmA = 0, ArmB = 0, LegA = 0, LegB = 0, Head = 0, Tail = 0, Wing = 0, Staff = 0;
+		float LiftA = 0, LiftB = 0;   // leg lift, fraction of sprite height
+		float StaffLift = 0;          // fraction of sprite height
+		float HeadScaleY = 1.0f;
+	};
+	Pose ComputePose(int SpriteIndex) const;
 	SpriteArt Sprites[SprCount];
-	bool bSpriteArt = true;
+	Texture2D Faces[SprCount]{};   // face decals for the 3D models
+	bool bSpriteArt = false;       // M toggles 3D models / cut-outs
 };

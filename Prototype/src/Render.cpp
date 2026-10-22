@@ -126,6 +126,73 @@ void main()
 }
 )";
 
+	// Static batch: colour per vertex, emissive and line weight in texcoord2.
+	const char* BatchVS = R"(#version 330
+in vec3 vertexPosition;
+in vec3 vertexNormal;
+in vec4 vertexColor;
+in vec2 vertexTexCoord2;
+uniform mat4 mvp;
+uniform mat4 matModel;
+out vec3 fragNormal;
+out vec3 fragWorld;
+out vec4 fragColor;
+out vec2 fragExtra;
+void main()
+{
+    fragWorld = (matModel * vec4(vertexPosition, 1.0)).xyz;
+    fragNormal = normalize(vertexNormal);
+    fragColor = vertexColor;
+    fragExtra = vertexTexCoord2;
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+)";
+
+	const char* BatchFS = R"(#version 330
+in vec3 fragNormal;
+in vec3 fragWorld;
+in vec4 fragColor;
+in vec2 fragExtra;
+uniform vec3 lightDir;
+uniform vec3 ambient;
+uniform vec3 fogColor;
+uniform float fogDensity;
+uniform float bands;
+uniform vec3 viewPos;
+out vec4 finalColor;
+void main()
+{
+    vec3 n = normalize(fragNormal);
+    if (!gl_FrontFacing) n = -n;
+    float ndl = max(dot(n, -normalize(lightDir)), 0.0);
+    float s = ndl * bands;
+    float level = (floor(s) + smoothstep(0.42, 0.58, fract(s))) / bands;
+    vec3 v = normalize(viewPos - fragWorld);
+    float rim = smoothstep(0.62, 0.70, 1.0 - max(dot(n, v), 0.0)) * step(0.05, ndl);
+    vec3 base = fragColor.rgb;
+    float emissive = fragExtra.x;
+    vec3 lit = base * (ambient + vec3(1.0, 0.97, 0.9) * level * 0.85) + rim * 0.12;
+    lit = mix(lit, base * 1.2, emissive);
+    float dist = length(viewPos - fragWorld);
+    float fog = 1.0 - exp(-pow(dist * fogDensity, 2.0));
+    finalColor = vec4(mix(lit, fogColor, clamp(fog, 0.0, 1.0) * (1.0 - emissive * 0.6)), 1.0);
+}
+)";
+
+	const char* BatchNormalFS = R"(#version 330
+in vec3 fragNormal;
+in vec3 fragWorld;
+in vec4 fragColor;
+in vec2 fragExtra;
+out vec4 finalColor;
+void main()
+{
+    vec3 n = normalize(fragNormal);
+    if (!gl_FrontFacing) n = -n;
+    finalColor = vec4(n * 0.5 + 0.5, fragExtra.y);
+}
+)";
+
 	// Sobel on linear depth (relative) + normals, thickness from per-object weight.
 	const char* OutlineFS = R"(#version 330
 in vec2 fragTexCoord;
@@ -356,6 +423,52 @@ bool ToonRenderer::Init(int Width, int Height)
 	for (int i = 0; i < 6; ++i) SpriteQuad.indices[i] = I[i];
 	UploadMesh(&SpriteQuad, false);
 
+	BatchShader = LoadShaderFromMemory(BatchVS, BatchFS);
+	BatchNormalShader = LoadShaderFromMemory(BatchVS, BatchNormalFS);
+	if (BatchShader.id == rlGetShaderIdDefault() || BatchNormalShader.id == rlGetShaderIdDefault())
+	{
+		TraceLog(LOG_ERROR, "Toon: batch shader compilation failed");
+		return false;
+	}
+	BatchShader.locs[SHADER_LOC_VERTEX_TEXCOORD02] = GetShaderLocationAttrib(BatchShader, "vertexTexCoord2");
+	BatchNormalShader.locs[SHADER_LOC_VERTEX_TEXCOORD02] = GetShaderLocationAttrib(BatchNormalShader, "vertexTexCoord2");
+	LocBLightDir = GetShaderLocation(BatchShader, "lightDir");
+	LocBAmbient = GetShaderLocation(BatchShader, "ambient");
+	LocBFogColor = GetShaderLocation(BatchShader, "fogColor");
+	LocBFogDensity = GetShaderLocation(BatchShader, "fogDensity");
+	LocBBands = GetShaderLocation(BatchShader, "bands");
+	LocBViewPos = GetShaderLocation(BatchShader, "viewPos");
+	BatchMaterial = LoadMaterialDefault();
+	BatchMaterial.shader = BatchShader;
+	BatchNormalMaterial = LoadMaterialDefault();
+	BatchNormalMaterial.shader = BatchNormalShader;
+
+	// Low-poly CPU copies of the primitives for batching (expanded triangles).
+	{
+		Mesh Src[static_cast<int>(MeshKind::Count)] = {
+			GenMeshCube(1.0f, 1.0f, 1.0f), GenMeshCylinder(0.5f, 1.0f, 10), GenMeshSphere(0.5f, 6, 10),
+			GenMeshCone(0.5f, 1.0f, 8), GenMeshCone(0.5f, 1.0f, 4) };
+		RecenterY(Src[static_cast<int>(MeshKind::Cylinder)]);
+		RecenterY(Src[static_cast<int>(MeshKind::Cone)]);
+		RecenterY(Src[static_cast<int>(MeshKind::Pyramid)]);
+		SquarePyramid(Src[static_cast<int>(MeshKind::Pyramid)]);
+		for (int k = 0; k < static_cast<int>(MeshKind::Count); ++k)
+		{
+			const Mesh& M = Src[k];
+			const int Count = M.indices ? M.triangleCount * 3 : M.vertexCount;
+			for (int i = 0; i < Count; ++i)
+			{
+				const int Vi = M.indices ? M.indices[i] : i;
+				for (int c = 0; c < 3; ++c)
+				{
+					LowPoly[k].V.push_back(M.vertices[Vi * 3 + c]);
+					LowPoly[k].N.push_back(M.normals[Vi * 3 + c]);
+				}
+			}
+			UnloadMesh(Src[k]);
+		}
+	}
+
 	CelMaterial = LoadMaterialDefault();
 	CelMaterial.shader = CelShader;
 	NormalMaterial = LoadMaterialDefault();
@@ -392,6 +505,9 @@ void ToonRenderer::Shutdown()
 	{
 		UnloadMesh(M);
 	}
+	ClearStatic();
+	UnloadShader(BatchShader);
+	UnloadShader(BatchNormalShader);
 	UnloadMesh(SpriteQuad);
 	UnloadShader(SpriteShader);
 	UnloadShader(SpriteNormalShader);
@@ -420,6 +536,12 @@ void ToonRenderer::BeginPass(RenderPass InPass, const Camera3D& Cam, const Scene
 		SetShaderValue(CelShader, LocFogDensity, &Light.FogDensity, SHADER_UNIFORM_FLOAT);
 		SetShaderValue(CelShader, LocBands, &Light.Bands, SHADER_UNIFORM_FLOAT);
 		SetShaderValue(CelShader, LocViewPos, &Cam.position, SHADER_UNIFORM_VEC3);
+		SetShaderValue(BatchShader, LocBLightDir, &SunDir, SHADER_UNIFORM_VEC3);
+		SetShaderValue(BatchShader, LocBAmbient, &Ambient, SHADER_UNIFORM_VEC3);
+		SetShaderValue(BatchShader, LocBFogColor, &Fog, SHADER_UNIFORM_VEC3);
+		SetShaderValue(BatchShader, LocBFogDensity, &Light.FogDensity, SHADER_UNIFORM_FLOAT);
+		SetShaderValue(BatchShader, LocBBands, &Light.Bands, SHADER_UNIFORM_FLOAT);
+		SetShaderValue(BatchShader, LocBViewPos, &Cam.position, SHADER_UNIFORM_VEC3);
 		SetShaderValue(SpriteShader, LocSpriteFogColor, &Fog, SHADER_UNIFORM_VEC3);
 		SetShaderValue(SpriteShader, LocSpriteFogDensity, &Light.FogDensity, SHADER_UNIFORM_FLOAT);
 		SetShaderValue(SpriteShader, LocSpriteViewPos, &Cam.position, SHADER_UNIFORM_VEC3);
@@ -469,10 +591,6 @@ void ToonRenderer::Draw(MeshKind Kind, const Matrix& Transform, Color Tint, floa
 void ToonRenderer::DrawSprite(const Texture2D& Tex, Vector3 Feet, Vector3 Right, Vector3 ToCamera, float Width, float Height,
                               float Roll, bool bFlip, Color Tint, float Flash, float LineWeight)
 {
-	if (Tex.id == 0)
-	{
-		return;
-	}
 	const Vector3 Up{ 0.0f, 1.0f, 0.0f };
 	const float C = std::cos(Roll), S = std::sin(Roll);
 	// Lean: rotate the right/up axes about the view direction.
@@ -480,11 +598,26 @@ void ToonRenderer::DrawSprite(const Texture2D& Tex, Vector3 Feet, Vector3 Right,
 	Vector3 Y = Vector3Add(Vector3Scale(Right, -S), Vector3Scale(Up, C));
 	X = Vector3Scale(X, Width * (bFlip ? -1.0f : 1.0f));
 	Y = Vector3Scale(Y, Height);
+	const Vector3 BL = Vector3Subtract(Feet, Vector3Scale(X, 0.5f));
+	DrawSpriteQuad(Tex, BL, Vector3Add(BL, X), Vector3Add(BL, Y), ToCamera, Tint, Flash, LineWeight);
+}
+
+void ToonRenderer::DrawSpriteQuad(const Texture2D& Tex, Vector3 BL, Vector3 BR, Vector3 TL, Vector3 ToCamera,
+                                  Color Tint, float Flash, float LineWeight)
+{
+	if (Tex.id == 0)
+	{
+		return;
+	}
+	// Unit quad spans x -0.5..0.5, y 0..1.
+	const Vector3 X = Vector3Subtract(BR, BL);
+	const Vector3 Y = Vector3Subtract(TL, BL);
+	const Vector3 O = Vector3Add(BL, Vector3Scale(X, 0.5f));
 	Matrix M{};
 	M.m0 = X.x; M.m1 = X.y; M.m2 = X.z;
 	M.m4 = Y.x; M.m5 = Y.y; M.m6 = Y.z;
 	M.m8 = ToCamera.x; M.m9 = ToCamera.y; M.m10 = ToCamera.z;
-	M.m12 = Feet.x; M.m13 = Feet.y; M.m14 = Feet.z;
+	M.m12 = O.x; M.m13 = O.y; M.m14 = O.z;
 	M.m15 = 1.0f;
 
 	rlDisableBackfaceCulling();
@@ -503,6 +636,101 @@ void ToonRenderer::DrawSprite(const Texture2D& Tex, Vector3 Feet, Vector3 Right,
 		DrawMesh(SpriteQuad, SpriteNormalMaterial, M);
 	}
 	rlEnableBackfaceCulling();
+}
+
+void ToonRenderer::BeginStaticBatch()
+{
+	Building.clear();
+}
+
+void ToonRenderer::AddStatic(MeshKind Kind, const Matrix& T, Color Tint, float Emissive, float LineWeight)
+{
+	const CpuMesh& Src = LowPoly[static_cast<int>(Kind)];
+	const Matrix NM = MatrixTranspose(MatrixInvert(T));
+	const long long Cx = static_cast<long long>(std::floor(T.m12 / 80.0f));
+	const long long Cz = static_cast<long long>(std::floor(T.m14 / 80.0f));
+	BatchBuild& B = Building[(Cx << 32) ^ (Cz & 0xffffffff)];
+	const size_t Count = Src.V.size() / 3;
+	for (size_t i = 0; i < Count; ++i)
+	{
+		const float X = Src.V[i * 3], Y = Src.V[i * 3 + 1], Z = Src.V[i * 3 + 2];
+		B.V.push_back(T.m0 * X + T.m4 * Y + T.m8 * Z + T.m12);
+		B.V.push_back(T.m1 * X + T.m5 * Y + T.m9 * Z + T.m13);
+		B.V.push_back(T.m2 * X + T.m6 * Y + T.m10 * Z + T.m14);
+		const float Nx = Src.N[i * 3], Ny = Src.N[i * 3 + 1], Nz = Src.N[i * 3 + 2];
+		Vector3 N{ NM.m0 * Nx + NM.m4 * Ny + NM.m8 * Nz, NM.m1 * Nx + NM.m5 * Ny + NM.m9 * Nz, NM.m2 * Nx + NM.m6 * Ny + NM.m10 * Nz };
+		N = Vector3Normalize(N);
+		B.N.push_back(N.x);
+		B.N.push_back(N.y);
+		B.N.push_back(N.z);
+		B.C.push_back(Tint.r);
+		B.C.push_back(Tint.g);
+		B.C.push_back(Tint.b);
+		B.C.push_back(255);
+		B.T2.push_back(Emissive);
+		B.T2.push_back(std::max(LineWeight, 0.05f) * 0.25f);
+	}
+}
+
+void ToonRenderer::EndStaticBatch()
+{
+	for (auto& Pair : Building)
+	{
+		BatchBuild& B = Pair.second;
+		const int Verts = static_cast<int>(B.V.size() / 3);
+		if (Verts == 0)
+		{
+			continue;
+		}
+		BatchChunk C;
+		C.M.vertexCount = Verts;
+		C.M.triangleCount = Verts / 3;
+		C.M.vertices = static_cast<float*>(MemAlloc(B.V.size() * sizeof(float)));
+		C.M.normals = static_cast<float*>(MemAlloc(B.N.size() * sizeof(float)));
+		C.M.colors = static_cast<unsigned char*>(MemAlloc(B.C.size()));
+		C.M.texcoords2 = static_cast<float*>(MemAlloc(B.T2.size() * sizeof(float)));
+		std::memcpy(C.M.vertices, B.V.data(), B.V.size() * sizeof(float));
+		std::memcpy(C.M.normals, B.N.data(), B.N.size() * sizeof(float));
+		std::memcpy(C.M.colors, B.C.data(), B.C.size());
+		std::memcpy(C.M.texcoords2, B.T2.data(), B.T2.size() * sizeof(float));
+		UploadMesh(&C.M, false);
+		Vector3 Min{ 1e9f, 1e9f, 1e9f }, Max{ -1e9f, -1e9f, -1e9f };
+		for (int i = 0; i < Verts; ++i)
+		{
+			Min.x = std::min(Min.x, B.V[i * 3]); Max.x = std::max(Max.x, B.V[i * 3]);
+			Min.y = std::min(Min.y, B.V[i * 3 + 1]); Max.y = std::max(Max.y, B.V[i * 3 + 1]);
+			Min.z = std::min(Min.z, B.V[i * 3 + 2]); Max.z = std::max(Max.z, B.V[i * 3 + 2]);
+		}
+		C.Center = Vector3Scale(Vector3Add(Min, Max), 0.5f);
+		C.Radius = Vector3Length(Vector3Subtract(Max, Min)) * 0.5f;
+		Chunks.push_back(C);
+		StaticVerts += Verts;
+	}
+	Building.clear();
+}
+
+void ToonRenderer::ClearStatic()
+{
+	for (BatchChunk& C : Chunks)
+	{
+		UnloadMesh(C.M);
+	}
+	Chunks.clear();
+	StaticVerts = 0;
+}
+
+void ToonRenderer::DrawStatic(Vector3 CamPos, Vector3 CamForward, float MaxDistance)
+{
+	const Material& Mat = Pass == RenderPass::Color ? BatchMaterial : BatchNormalMaterial;
+	for (const BatchChunk& C : Chunks)
+	{
+		const Vector3 To = Vector3Subtract(C.Center, CamPos);
+		if (Vector3Length(To) - C.Radius > MaxDistance || Vector3DotProduct(To, CamForward) < -C.Radius)
+		{
+			continue;
+		}
+		DrawMesh(C.M, Mat, MatrixIdentity());
+	}
 }
 
 void ToonRenderer::Composite(const SceneLighting& Light)

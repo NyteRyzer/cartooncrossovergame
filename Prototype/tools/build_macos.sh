@@ -43,7 +43,7 @@ build_arch() {
 	# GLFW's Cocoa backend is Objective-C.
 	clang "${flags[@]}" "${RL_DEFS[@]}" -x objective-c -w -I "$RAYLIB_SRC/src" -I "$RAYLIB_SRC/src/external/glfw/include" \
 		-c "$RAYLIB_SRC/src/rglfw.c" -o "$obj/rl_rglfw.o" &
-	for f in main Game GameRender GameHud Render World; do
+	for f in main Game GameRender GameHud Render World Dressing GameCharacters; do
 		clang++ "${flags[@]}" -std=c++17 -Wall -Wextra -Wno-missing-field-initializers \
 			-I "$RAYLIB_SRC/src" -I "$RAYLIB_SRC/src/external/glfw/include" -I "$ROOT/Source/MultiverseToons/Public" \
 			-c "$ROOT/Prototype/src/$f.cpp" -o "$obj/$f.o" &

@@ -82,6 +82,14 @@ namespace
 		BlockStyle S;
 		const std::string& L = B.Label;
 		const unsigned H = Hash(L);
+		if (B.HasTint)
+		{
+			S.Tint = B.Tint;
+			S.Translucent = B.Tint.a < 255;
+			S.Emissive = B.Emissive;
+			return S;
+		}
+		if (L == "Retroland_FerrisWheel") { S.Hidden = true; return S; } // drawn animated
 		if (Contains(L, "_Volume")) { S.Hidden = true; return S; }
 		if (StartsWith(L, "FlightGate") || StartsWith(L, "RaceGate")) { S.Gate = true; S.Tint = Color{ 120, 255, 210, 255 }; return S; }
 		if (StartsWith(L, "EarthPillar")) { S.Tint = Color{ 115, 92, 72, 255 }; return S; }
@@ -129,6 +137,7 @@ namespace
 		case Shape::Cylinder: return MeshKind::Cylinder;
 		case Shape::Sphere: return MeshKind::Sphere;
 		case Shape::Cone: return MeshKind::Cone;
+		case Shape::Pyramid: return MeshKind::Pyramid;
 		default: return MeshKind::Cube;
 		}
 	}
@@ -169,36 +178,6 @@ namespace
 		}
 	};
 
-	// Shared kid-sized humanoid (140 cm). Arm angles swing forward from the
-	// shoulder (90 = pointing straight ahead); returns nothing, props are added
-	// by the caller at HandF/HandU.
-	void Humanoid(const Rig& G, Color Skin, Color Shirt, Color Pants, Color Shoes, float LegSwing,
-	              float RightArm, float LeftArm, bool bHead = true, float HeadSize = 36.0f, bool bLegs = true)
-	{
-		if (bLegs)
-		{
-			G.Limb(0, 8, 46, 12, 44, LegSwing, Pants);
-			G.Limb(0, -8, 46, 12, 44, -LegSwing, Pants);
-			G.Part(MeshKind::Cube, 3 + std::sin(LegSwing * Deg2Rad) * 40, 8, 3, 18, 12, 7, Shoes);
-			G.Part(MeshKind::Cube, 3 - std::sin(LegSwing * Deg2Rad) * 40, -8, 3, 18, 12, 7, Shoes);
-		}
-		G.Part(MeshKind::Cube, 0, 0, 64, 20, 30, 38, Shirt);
-		G.Limb(0, 20, 80, 9, 36, RightArm, Shirt);
-		G.Limb(0, -20, 80, 9, 36, LeftArm, Shirt);
-		G.Part(MeshKind::Sphere, std::sin(RightArm * Deg2Rad) * 38, 20, 80 - std::cos(RightArm * Deg2Rad) * 38, 11, 11, 11, Skin);
-		G.Part(MeshKind::Sphere, std::sin(LeftArm * Deg2Rad) * 38, -20, 80 - std::cos(LeftArm * Deg2Rad) * 38, 11, 11, 11, Skin);
-		if (bHead)
-		{
-			G.Part(MeshKind::Sphere, 0, 0, 100, HeadSize, HeadSize, HeadSize, Skin);
-			G.Part(MeshKind::Sphere, HeadSize * 0.42f, 6, 103, 7, 6, 9, Color{ 250, 250, 255, 255 });
-			G.Part(MeshKind::Sphere, HeadSize * 0.42f, -6, 103, 7, 6, 9, Color{ 250, 250, 255, 255 });
-			G.Part(MeshKind::Sphere, HeadSize * 0.47f, 6, 103, 4, 4, 5, Color{ 25, 25, 30, 255 });
-			G.Part(MeshKind::Sphere, HeadSize * 0.47f, -6, 103, 4, 4, 5, Color{ 25, 25, 30, 255 });
-		}
-	}
-
-	float HandF(float Angle) { return std::sin(Angle * Deg2Rad) * 38.0f; }
-	float HandU(float Angle) { return 80.0f - std::cos(Angle * Deg2Rad) * 38.0f; }
 }
 
 SceneLighting Game::Lighting() const
@@ -236,6 +215,10 @@ Camera3D Game::MakeCamera() const
 
 void Game::Render(ToonRenderer& R)
 {
+	if (BatchLevel != LevelIndex)
+	{
+		BuildStaticBatch(R);
+	}
 	const Camera3D Cam = MakeCamera();
 	const SceneLighting Light = Lighting();
 	R.BeginPass(RenderPass::Color, Cam, Light);
@@ -262,10 +245,57 @@ void Game::RenderScene(ToonRenderer& R, bool bTranslucent)
 		}
 	}
 
+	if (!bTranslucent)
+	{
+		R.DrawStatic(ToRender(CamPos), Vector3{ CamForward().x, CamForward().z, CamForward().y }, 1600.0f);
+	}
 	RenderBlocks(R, bTranslucent);
 
 	if (!bTranslucent)
 	{
+		// Retroland ferris wheel, turning.
+		if (const Block* W = L.FindBlock("Retroland_FerrisWheel"))
+		{
+			const float Spin = Time * 8.0f;
+			const float Rad = W->Half.x;
+			const Vector3 C = W->Center;
+			auto OnWheel = [&](float A, float Rr) { return Vector3{ C.x, C.y + std::cos(A * Deg2Rad) * Rr, C.z + std::sin(A * Deg2Rad) * Rr }; };
+			for (int k = 0; k < 24; ++k)
+			{
+				const float A = Spin + k * 15.0f;
+				R.Draw(MeshKind::Cube, BoxTransform(OnWheel(A, Rad), Vector3{ 60, 2 * 3.14159f * Rad / 24.0f + 30, 60 }, 0.0f, 0.0f, A), Color{ 255, 90, 100, 255 }, 1.6f, 0.2f);
+			}
+			for (int k = 0; k < 12; ++k)
+			{
+				const float A = Spin + k * 30.0f;
+				R.Draw(MeshKind::Cube, BoxTransform(OnWheel(A, Rad * 0.5f), Vector3{ 30, Rad, 30 }, 0.0f, 0.0f, A), Color{ 250, 250, 250, 255 }, 1.2f);
+				const Vector3 G = Add(OnWheel(A, Rad), Vector3{ 120, 0, -200 });
+				const Color Gc = k % 3 == 0 ? Color{ 120, 200, 255, 255 } : (k % 3 == 1 ? Color{ 255, 220, 80, 255 } : Color{ 140, 230, 140, 255 });
+				R.Draw(MeshKind::Cube, BoxTransform(G, Vector3{ 220, 200, 180 }, 0.0f), Gc, 1.6f);
+			}
+			R.Draw(MeshKind::Cylinder, BoxTransform(C, Vector3{ 260, 260, 500 }, 0.0f, 90.0f), Color{ 220, 220, 230, 255 }, 1.6f);
+			for (int s = -1; s <= 1; s += 2)
+			{
+				R.Draw(MeshKind::Cube, BoxTransform(Vector3{ C.x + 150, C.y + s * Rad * 0.45f, C.z * 0.5f }, Vector3{ 60, 60, C.z + 100 }, 0.0f, 0.0f, s * 20.0f), Color{ 200, 200, 210, 255 }, 1.6f);
+			}
+		}
+		// Rift Core energy rings.
+		if (const Block* Orb = L.FindBlock("RiftCore_Orb"))
+		{
+			for (int ring = 0; ring < 3; ++ring)
+			{
+				const float Tilt = 25.0f + ring * 55.0f, Spin = Time * (30.0f + ring * 20.0f) * (ring % 2 ? -1.0f : 1.0f);
+				const float Rr = Orb->Half.x * (1.5f + ring * 0.35f);
+				for (int k = 0; k < 18; ++k)
+				{
+					const float A = (Spin + k * 20.0f) * Deg2Rad;
+					const float Ct = std::cos(Tilt * Deg2Rad), St = std::sin(Tilt * Deg2Rad);
+					const Vector3 P{ Orb->Center.x + std::cos(A) * Rr, Orb->Center.y + std::sin(A) * Rr * Ct, Orb->Center.z + std::sin(A) * Rr * St };
+					R.Draw(MeshKind::Cube, BoxTransform(P, Vector3{ 70, 70, 70 }, A * 50.0f), ring == 1 ? Color{ 255, 120, 220, 255 } : Color{ 120, 255, 230, 255 }, 1.0f, 1.0f);
+				}
+			}
+		}
+
 		for (size_t i = 0; i < L.Markers.size(); ++i)
 		{
 			if (L.Markers[i].Class == "DimensionalTerminal")
@@ -405,6 +435,49 @@ void Game::RenderGate(ToonRenderer& R, const Block& B, Color Tint, float Emissiv
 	Bar(-Wide * 0.5f + Thin * 0.5f, 0, Thin, B.Size.z);
 }
 
+namespace
+{
+	bool IsDynamicBlock(const Block& B, const BlockStyle& S)
+	{
+		return S.Gate || S.Translucent || B.Label.rfind("EarthPillar", 0) == 0;
+	}
+
+	Color RoofColorFor(const Block& B)
+	{
+		if (B.RoofTint.a > 0) return B.RoofTint;
+		const unsigned H = Hash(B.Label) % 3;
+		return H == 0 ? Color{ 90, 110, 160, 255 } : (H == 1 ? Color{ 185, 80, 70, 255 } : Color{ 110, 90, 80, 255 });
+	}
+}
+
+void Game::BuildStaticBatch(ToonRenderer& R)
+{
+	const Level& L = Levels[LevelIndex];
+	R.ClearStatic();
+	R.BeginStaticBatch();
+	auto AddBlock = [&](const Block& B) {
+		const BlockStyle S = StyleFor(B, LevelIndex);
+		if (S.Hidden || IsDynamicBlock(B, S))
+		{
+			return;
+		}
+		Vector3 Size = B.Size;
+		if (B.Kind == Shape::Plane) Size.z = 4.0f;
+		R.AddStatic(MeshFor(B.Kind), BoxTransform(B.Center, Size, B.YawDeg, B.PitchDeg), S.Tint, S.Emissive, EnvLineWeight);
+		if (B.RoofHeight > 0.0f)
+		{
+			const Vector3 Top{ B.Center.x, B.Center.y, B.Center.z + B.Half.z + B.RoofHeight * 0.5f };
+			R.AddStatic(MeshKind::Pyramid, BoxTransform(Top, Vector3{ B.Size.x * Block::RoofOverhang, B.Size.y * Block::RoofOverhang, B.RoofHeight }, B.YawDeg),
+			            RoofColorFor(B), 0.0f, EnvLineWeight);
+		}
+	};
+	for (const Block& B : L.Blocks) AddBlock(B);
+	for (const Block& B : L.Decor) AddBlock(B);
+	R.EndStaticBatch();
+	BatchLevel = LevelIndex;
+	TraceLog(LOG_INFO, "Static batch: %d vertices", R.StaticVertexCount());
+}
+
 void Game::RenderBlocks(ToonRenderer& R, bool bTranslucent)
 {
 	const Level& L = Levels[LevelIndex];
@@ -418,42 +491,29 @@ void Game::RenderBlocks(ToonRenderer& R, bool bTranslucent)
 		for (int G : C.Gates) CourseGates.push_back(G);
 	}
 
-	for (size_t i = 0; i < L.Blocks.size(); ++i)
-	{
-		const Block& B = L.Blocks[i];
+	auto DrawDynamic = [&](const Block& B, int Index) {
 		const BlockStyle S = StyleFor(B, LevelIndex);
-		if (S.Hidden || S.Translucent != bTranslucent)
+		if (S.Hidden || S.Translucent != bTranslucent || !IsDynamicBlock(B, S))
 		{
-			continue;
+			return;
 		}
-		// Cheap culling: behind the camera.
-		const Vector3 To = Sub(B.Center, CamPos);
-		const float Radius = std::max(B.BoundRadiusXY, B.Half.z);
-		if (To.x * Fwd.x + To.y * Fwd.y + To.z * Fwd.z < -Radius - 500.0f)
-		{
-			continue;
-		}
-
 		if (S.Gate)
 		{
-			const bool bNext = std::find(NextGates.begin(), NextGates.end(), static_cast<int>(i)) != NextGates.end();
+			const bool bNext = std::find(NextGates.begin(), NextGates.end(), Index) != NextGates.end();
 			const float Pulse = 0.5f + 0.5f * std::sin(Time * 6.0f);
 			RenderGate(R, B, bNext ? Lerp(Color{ 80, 255, 160, 255 }, Color{ 255, 255, 120, 255 }, Pulse) : Color{ 110, 150, 190, 255 }, bNext ? 0.9f : 0.1f);
-			continue;
+			return;
 		}
-
-		Vector3 Size = B.Size;
-		if (B.Kind == Shape::Plane) Size.z = 4.0f;
-		R.Draw(MeshFor(B.Kind), BoxTransform(B.Center, Size, B.YawDeg, B.PitchDeg), S.Tint, EnvLineWeight, S.Emissive);
-
+		R.Draw(MeshFor(B.Kind), BoxTransform(B.Center, B.Size, B.YawDeg, B.PitchDeg), S.Tint, EnvLineWeight, S.Emissive);
 		if (B.RoofHeight > 0.0f)
 		{
-			const float RoofH = B.RoofHeight;
-			const Vector3 Top{ B.Center.x, B.Center.y, B.Center.z + B.Half.z + RoofH * 0.5f };
-			const Color RoofColor = (Hash(B.Label) % 3 == 0) ? Color{ 90, 110, 160, 255 } : (Hash(B.Label) % 3 == 1 ? Color{ 185, 80, 70, 255 } : Color{ 110, 90, 80, 255 });
-			R.Draw(MeshKind::Pyramid, BoxTransform(Top, Vector3{ B.Size.x * Block::RoofOverhang, B.Size.y * Block::RoofOverhang, RoofH }, B.YawDeg), RoofColor, EnvLineWeight);
+			const Vector3 Top{ B.Center.x, B.Center.y, B.Center.z + B.Half.z + B.RoofHeight * 0.5f };
+			R.Draw(MeshKind::Pyramid, BoxTransform(Top, Vector3{ B.Size.x * Block::RoofOverhang, B.Size.y * Block::RoofOverhang, B.RoofHeight }, B.YawDeg), RoofColorFor(B), EnvLineWeight);
 		}
-	}
+	};
+	for (size_t i = 0; i < L.Blocks.size(); ++i) DrawDynamic(L.Blocks[i], static_cast<int>(i));
+	for (const Block& B : L.Decor) DrawDynamic(B, -1);
+	(void)Fwd;
 }
 
 void Game::RenderTerminal(ToonRenderer& R, const Marker& M, int Index)
@@ -549,6 +609,116 @@ void Game::RenderGoddard(ToonRenderer& R)
 	G.Part(MeshKind::Sphere, -36, 0, 52, 6, 6, 6, Color{ 255, 80, 80, 255 }, 0.8f);
 }
 
+Game::Pose Game::ComputePose(int Id) const
+{
+	Pose O;
+	const float Speed = std::sqrt(P.Vel.x * P.Vel.x + P.Vel.y * P.Vel.y);
+	const float S = P.Grounded ? std::min(1.0f, Speed / 650.0f) : 0.0f;
+	const float Run = P.Grounded ? std::clamp((Speed - 700.0f) / 800.0f, 0.0f, 1.0f) : 0.0f;
+	const float Ph = P.WalkPhase;
+	const float Swing = std::sin(Ph);
+	const float Atk = P.AttackAnim > 0.0f ? std::sin(3.14159f * (1.0f - P.AttackAnim / 0.25f)) : 0.0f;
+	const float Hurt = std::min(1.0f, P.HurtFlash / 0.25f);
+	const bool bAir = !P.Grounded && !P.Flying && !P.Gliding;
+
+	// Arms at rest (the sheet has T- and A-poses; bring them down naturally).
+	float RestA = 0.0f, RestB = 0.0f;
+	if (Id == static_cast<int>(HeroId::Jimmy)) { RestA = 68.0f; RestB = -68.0f; }
+	else if (Id == SprHeatblast) { RestA = 12.0f; RestB = -12.0f; }
+	else if (Id == static_cast<int>(HeroId::Jake) || Id == static_cast<int>(HeroId::Ben) || Id == static_cast<int>(HeroId::XJ9)) { RestA = 6.0f; RestB = -6.0f; }
+
+	// Idle: breathing sway and a slow head bob.
+	const float Breath = std::sin(Time * 2.2f);
+	O.ArmA = RestA + Breath * 3.0f;
+	O.ArmB = RestB - Breath * 3.0f;
+	O.Head = std::sin(Time * 1.6f) * 3.0f;
+
+	// Walk / run: alternating leg lifts, pendulum arms, bobbing head.
+	const float Amp = 1.0f + Run * 0.8f;
+	O.LegA = Swing * 16.0f * S * Amp;
+	O.LegB = Swing * 16.0f * S * Amp;
+	O.LiftA = std::max(0.0f, Swing) * 0.07f * S * Amp;
+	O.LiftB = std::max(0.0f, -Swing) * 0.07f * S * Amp;
+	O.ArmA += -Swing * 28.0f * S * Amp;
+	O.ArmB += -Swing * 28.0f * S * Amp;
+	O.Head += Swing * 5.0f * S;
+
+	if (bAir)
+	{
+		// Jump: arms thrown up, legs apart.
+		const float Up = P.Vel.z > 0.0f ? 1.0f : 0.6f;
+		O.ArmA = RestA - 55.0f * Up;
+		O.ArmB = RestB + 55.0f * Up;
+		O.LegA = -14.0f;
+		O.LegB = 14.0f;
+		O.LiftA = O.LiftB = 0.03f;
+	}
+	if (P.Flying)
+	{
+		// Flight: arms swept back, legs trailing and drifting.
+		const float F = std::sin(Time * 3.5f);
+		O.ArmA = RestA - 30.0f + F * 6.0f;
+		O.ArmB = RestB + 30.0f - F * 6.0f;
+		O.LegA = -6.0f + F * 7.0f;
+		O.LegB = 6.0f + F * 7.0f;
+	}
+
+	// Attacks: blasters raise the casting arm, brawlers punch with both.
+	const bool bBrawler = Id == static_cast<int>(HeroId::Jake) || Id == static_cast<int>(HeroId::ElTigre)
+		|| Id == static_cast<int>(HeroId::Ben) || Id == SprFourArms;
+	if (Atk > 0.0f)
+	{
+		if (Id == static_cast<int>(HeroId::Timmy))
+		{
+			O.ArmA = RestA - 70.0f * Atk; // wand hand
+		}
+		else if (bBrawler)
+		{
+			const bool bRight = std::fmod(Time * 4.0f, 2.0f) < 1.0f; // alternate jabs
+			if (bRight) O.ArmB = RestB + 80.0f * Atk; else O.ArmA = RestA - 80.0f * Atk;
+		}
+		else
+		{
+			O.ArmB = RestB + 85.0f * Atk;
+		}
+		O.Head -= 6.0f * Atk;
+	}
+	if (P.BreathTime > 0.0f)
+	{
+		O.Head += 10.0f; // rear back to breathe fire
+	}
+	if (Hurt > 0.0f)
+	{
+		O.Head += 12.0f * Hurt;
+		O.ArmA += std::sin(Time * 40.0f) * 18.0f * Hurt;
+		O.ArmB -= std::sin(Time * 40.0f) * 18.0f * Hurt;
+	}
+
+	// Character specifics.
+	if (Id == static_cast<int>(HeroId::Danny))
+	{
+		O.Tail = std::sin(Time * 3.0f) * 10.0f + Swing * 8.0f * S;
+	}
+	else if (Id == static_cast<int>(HeroId::Aang))
+	{
+		O.Staff = std::sin(Time * 1.4f) * 4.0f - Swing * 6.0f * S;
+		if (Atk > 0.0f) O.Staff = 360.0f * (1.0f - P.AttackAnim / 0.25f); // staff twirl
+		if (P.Gliding) { O.Staff = 0.0f; O.StaffLift = 0.22f; }
+		if (P.ScooterTime > 0.0f) { O.LegA = -10.0f; O.LegB = 10.0f; }
+	}
+	else if (Id == SprHeatblast)
+	{
+		O.HeadScaleY = 1.0f + 0.06f * std::sin(Time * 13.0f);
+	}
+	else if (Id == SprDragon)
+	{
+		O.Wing = std::sin(Time * 7.0f) * 22.0f;
+		O.Head = std::sin(Time * 2.0f) * 4.0f - (P.BreathTime > 0.0f ? 8.0f : 0.0f);
+		O.Tail = std::sin(Time * 2.5f) * 9.0f;
+	}
+	return O;
+}
+
 bool Game::RenderHeroSprite(ToonRenderer& R, unsigned char Alpha, bool bHurt)
 {
 	const FormDef* Form = P.Hero == HeroId::Ben ? GetFormDef(P.Omni.GetActiveForm()) : nullptr;
@@ -608,8 +778,50 @@ bool Game::RenderHeroSprite(ToonRenderer& R, unsigned char Alpha, bool bHurt)
 	const Vector3 Right{ -std::sin(CamYaw * Deg2Rad), 0.0f, std::cos(CamYaw * Deg2Rad) };
 	const Vector3 ToCam{ -std::cos(CamYaw * Deg2Rad), 0.0f, -std::sin(CamYaw * Deg2Rad) };
 	const Vector3 Feet = Sub(P.Pos, Vector3{ 0, 0, P.H - Bob });
-	R.DrawSprite(S.Tex, ToRender(Feet), Right, ToCam, Width * 0.01f, Height * 0.01f, Roll, P.SpriteFlip,
-	             Color{ 255, 255, 255, Alpha }, bHurt ? 0.75f : 0.0f, H.LineWeight);
+	const Color Tint{ 255, 255, 255, Alpha };
+	const float Flash = bHurt ? 0.75f : 0.0f;
+	if (S.Parts.empty() || S.RigH <= 0.0f)
+	{
+		R.DrawSprite(S.Tex, ToRender(Feet), Right, ToCam, Width * 0.01f, Height * 0.01f, Roll, P.SpriteFlip, Tint, Flash, H.LineWeight);
+	}
+	else
+	{
+		// Posed cut-out puppet: rotate each part about its joint (sprite pixel
+		// space, y down), then squash/lean the whole figure about the feet.
+		const Pose Po = ComputePose(Id);
+		const float K = S.HeightCm * Scale / S.RigH;   // cm per sprite pixel (height)
+		const float FX = S.RigW * 0.5f, FY = S.RigH;
+		const Vector3 RightUe{ -std::sin(CamYaw * Deg2Rad), std::cos(CamYaw * Deg2Rad), 0.0f };
+		const Vector3 ToCamUe{ -std::cos(CamYaw * Deg2Rad), -std::sin(CamYaw * Deg2Rad), 0.0f };
+		const float Cr = std::cos(Roll), Sr = std::sin(Roll);
+		for (const RigPart& Part : S.Parts)
+		{
+			float Angle = 0.0f, LiftY = 0.0f, ScaleY = 1.0f;
+			if (Part.Name == "arm_a") Angle = Po.ArmA;
+			else if (Part.Name == "arm_b") Angle = Po.ArmB;
+			else if (Part.Name == "leg_a") { Angle = Po.LegA; LiftY = -Po.LiftA * S.RigH; }
+			else if (Part.Name == "leg_b") { Angle = Po.LegB; LiftY = -Po.LiftB * S.RigH; }
+			else if (Part.Name == "head") { Angle = Po.Head; ScaleY = Po.HeadScaleY; }
+			else if (Part.Name == "tail") Angle = Po.Tail;
+			else if (Part.Name == "wing") Angle = Po.Wing;
+			else if (Part.Name == "staff") { Angle = Po.Staff; LiftY = -Po.StaffLift * S.RigH; }
+			const float A = Angle * Deg2Rad, Ca = std::cos(A), Sa = std::sin(A);
+			auto Map = [&](float X, float Y) {
+				// Joint rotation (counter-clockwise as seen; y points down).
+				float Dx = X - Part.PX, Dy = (Y - Part.PY) * ScaleY;
+				float Px = Part.PX + Dx * Ca + Dy * Sa;
+				float Py = Part.PY - Dx * Sa + Dy * Ca + LiftY;
+				// Whole-figure squash and lean about the feet.
+				float Lx = (Px - FX) * SX, Ly = (Py - FY) * SY;
+				float Rx = Lx * Cr + Ly * Sr, Ry = -Lx * Sr + Ly * Cr;
+				if (P.SpriteFlip) Rx = -Rx;
+				const Vector3 W = Add(Add(Feet, Mul(RightUe, Rx * K)), Vector3{ 0.0f, 0.0f, -Ry * K });
+				return ToRender(Add(W, Mul(ToCamUe, 0.6f * static_cast<float>(Part.Z))));
+			};
+			R.DrawSpriteQuad(Part.Tex, Map(Part.X, Part.Y + Part.H), Map(Part.X + Part.W, Part.Y + Part.H), Map(Part.X, Part.Y),
+			                 ToCam, Tint, Flash, H.LineWeight);
+		}
+	}
 
 	// Cosmo & Wanda: hovering at Timmy's shoulder, or his cloud-board in flight.
 	const SpriteArt& F = Sprites[SprFairies];
@@ -643,26 +855,8 @@ void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 	{
 		return;
 	}
-	const HeroDef& H = GetHeroDef(P.Hero);
-	const FormDef* Form = P.Hero == HeroId::Ben ? GetFormDef(P.Omni.GetActiveForm()) : nullptr;
-	const Vector3 Feet = Sub(P.Pos, Vector3{ 0, 0, P.H });
-	const float Speed = std::sqrt(P.Vel.x * P.Vel.x + P.Vel.y * P.Vel.y);
-	const bool bAttack = P.AttackAnim > 0.0f || P.BreathTime > 0.0f;
-	float Leg = (P.Grounded ? std::min(1.0f, Speed / 600.0f) : 0.25f) * std::sin(P.WalkPhase) * 35.0f;
-	float RA = bAttack ? 85.0f : -Leg * 0.8f;
-	float LA = Leg * 0.8f;
-	if (P.Flying)
-	{
-		Leg = -12.0f;
-		RA = bAttack ? 85.0f : -25.0f;
-		LA = -25.0f;
-	}
 	const unsigned char Alpha = bGhost ? 110 : 255;
 	const bool bHurt = P.HurtFlash > 0.0f && std::fmod(Time, 0.1f) < 0.05f;
-	auto Tint = [&](Color C) { return bHurt ? Color{ 255, 255, 255, C.a } : C; };
-	// Point along an arm, Dist cm past the hand.
-	auto AlongF = [](float A, float Dist) { return HandF(A) + std::sin(A * Deg2Rad) * Dist; };
-	auto AlongU = [](float A, float Dist) { return HandU(A) - std::cos(A * Deg2Rad) * Dist; };
 
 	if (P.Hero == HeroId::Ben && P.Omni.GetState() == Omnitrix::EState::Transforming)
 	{
@@ -676,321 +870,5 @@ void Game::RenderHero(ToonRenderer& R, bool bTranslucent)
 		return;
 	}
 
-	if (Form)
-	{
-		Rig G{ &R, Feet, P.Yaw, P.H / Form->HalfHeight, 2.0f, Alpha };
-		const std::string Name = Form->Name;
-		if (Name == "Heatblast")
-		{
-			G.Scale = P.H / 70.0f * 0.95f;
-			const Color Magma = Tint(Form->Body), Rock = Shade(Form->Body, 0.6f);
-			Humanoid(G, Magma, Magma, Rock, Shade(Form->Body, 0.45f), Leg, RA, LA, false);
-			for (int k = 0; k < 3; ++k)
-			{
-				G.Part(MeshKind::Cube, 10.5f, -6 + k * 6, 58 + k * 8, 2, 3, 14, Color{ 255, 210, 60, 255 }, 1.0f, 0.0f, 0.0f, 30.0f - k * 25.0f);
-			}
-			const float Flick = std::sin(Time * 20.0f) * 4.0f;
-			G.Part(MeshKind::Sphere, 0, 0, 100, 34, 34, 34, Magma, 0.3f);
-			G.Part(MeshKind::Cone, -2, 0, 128 + Flick, 36, 36, 52, Color{ 255, 160, 30, 255 }, 1.0f);
-			G.Part(MeshKind::Cone, -6, 0, 152 + Flick, 20, 20, 36, Color{ 255, 240, 120, 255 }, 1.0f);
-			G.Part(MeshKind::Sphere, 15, 6, 102, 7, 7, 8, Color{ 255, 255, 180, 255 }, 1.0f);
-			G.Part(MeshKind::Sphere, 15, -6, 102, 7, 7, 8, Color{ 255, 255, 180, 255 }, 1.0f);
-			if (bAttack)
-			{
-				G.Part(MeshKind::Sphere, HandF(RA), 20, HandU(RA), 18, 18, 18, Color{ 255, 190, 40, 255 }, 1.0f);
-			}
-		}
-		else if (Name == "Four Arms")
-		{
-			// 240 cm red brute: black top with a white stripe, gold belt, two pairs of arms.
-			G.Scale = P.H / 120.0f;
-			const Color Skin = Tint(Form->Body), Black{ 35, 35, 40, 255 };
-			G.Limb(0, 16, 80, 22, 80, Leg, Black);
-			G.Limb(0, -16, 80, 22, 80, -Leg, Black);
-			G.Part(MeshKind::Cube, 0, 0, 125, 44, 70, 70, Black);
-			G.Part(MeshKind::Cube, 0, 0, 125, 45, 18, 70, Color{ 240, 240, 240, 255 });
-			G.Part(MeshKind::Cube, 0, 0, 92, 46, 72, 8, Color{ 230, 190, 60, 255 });
-			const float Punch = bAttack ? 80.0f : 0.0f;
-			G.Limb(0, 44, 155, 20, 70, -Leg + Punch, Skin);
-			G.Limb(0, -44, 155, 20, 70, Leg + Punch, Skin);
-			G.Limb(0, 40, 128, 18, 62, Leg * 0.5f + Punch * 0.7f, Skin);
-			G.Limb(0, -40, 128, 18, 62, -Leg * 0.5f + Punch * 0.7f, Skin);
-			G.Part(MeshKind::Sphere, 4, 0, 180, 40, 40, 38, Skin);
-			for (int e = 0; e < 4; ++e)
-			{
-				G.Part(MeshKind::Sphere, 21, e < 2 ? 8 : -8, e % 2 ? 176 : 186, 6, 6, 6, Color{ 255, 220, 60, 255 }, 0.8f);
-			}
-		}
-		else if (Name == "XLR8")
-		{
-			G.Scale = P.H / 75.0f;
-			const float Lean = std::min(1.0f, Speed / 1500.0f) * 25.0f;
-			G.Limb(0, 9, 50, 12, 48, Leg * 1.4f, Form->Accent);
-			G.Limb(0, -9, 50, 12, 48, -Leg * 1.4f, Form->Accent);
-			G.Part(MeshKind::Cube, 4, 0, 70, 22, 28, 40, Tint(Form->Body), 0.0f, -Lean);
-			G.Limb(4, 20, 86, 9, 36, RA, Form->Body);
-			G.Limb(4, -20, 86, 9, 36, LA, Form->Body);
-			G.Part(MeshKind::Sphere, 14, 0, 108, 36, 30, 32, Form->Body);
-			G.Part(MeshKind::Cube, 30, 0, 110, 22, 24, 14, Color{ 20, 20, 25, 255 }, 0.0f, 10.0f);
-			G.Part(MeshKind::Cone, -32, 0, 56, 14, 14, 60, Form->Body, 0.0f, 120.0f);
-			G.Part(MeshKind::Sphere, 24, 0, 112, 8, 20, 6, Color{ 80, 200, 255, 255 }, 1.0f);
-		}
-		else if (Name == "Cannonbolt")
-		{
-			const float Roll = P.WalkPhase * 40.0f;
-			G.Scale = 1.0f;
-			G.Part(MeshKind::Sphere, 0, 0, P.H, P.H * 2.0f, P.H * 2.0f, P.H * 2.0f, Form->Body, 0.0f, Roll);
-			for (int k = 0; k < 4; ++k)
-			{
-				G.Part(MeshKind::Cube, 0, 0, P.H, P.H * 2.04f, 14, P.H * 0.5f, Form->Accent, 0.0f, Roll + k * 45.0f);
-			}
-		}
-		else // Way Big
-		{
-			G.Scale = P.H / 70.0f;
-			Humanoid(G, Form->Body, Form->Body, Form->Accent, Form->Accent, Leg * 0.6f, RA, LA, false);
-			G.Part(MeshKind::Cube, 0.5f, 0, 64, 21, 10, 40, Form->Accent);
-			G.Part(MeshKind::Sphere, 0, 0, 100, 34, 30, 36, Form->Body);
-			G.Part(MeshKind::Cone, -2, 0, 124, 8, 30, 30, Form->Accent);
-			G.Part(MeshKind::Sphere, 15, 6, 102, 6, 7, 5, Color{ 255, 240, 120, 255 }, 1.0f);
-			G.Part(MeshKind::Sphere, 15, -6, 102, 6, 7, 5, Color{ 255, 240, 120, 255 }, 1.0f);
-		}
-		return;
-	}
-
-	Rig G{ &R, Feet, P.Yaw, P.H / 70.0f, H.LineWeight, Alpha };
-	const Color Skin = Tint(H.Skin);
-	const Color Shirt = Tint(H.Primary);
-	const Color Pants = Tint(H.Secondary);
-	const Color White{ 245, 245, 250, 255 };
-
-	switch (P.Hero)
-	{
-	case HeroId::Jimmy:
-	{
-		Humanoid(G, Skin, Shirt, Pants, White, Leg, RA, LA, true, 46.0f);
-		// The famous swirl.
-		G.Part(MeshKind::Sphere, -2, 0, 124, 42, 42, 28, H.Hair);
-		G.Part(MeshKind::Cone, -1, 0, 148, 32, 32, 42, H.Hair, 0.0f, -10.0f);
-		G.Part(MeshKind::Cone, 6, 0, 170, 15, 15, 20, H.Hair, 0.0f, -45.0f);
-		// Atom logo.
-		G.Part(MeshKind::Sphere, 10.5f, 0, 70, 3, 6, 6, Color{ 255, 220, 60, 255 }, 0.6f);
-		G.Part(MeshKind::Cube, 10.5f, 0, 70, 2, 18, 3, Color{ 255, 220, 60, 255 }, 0.4f, 0.0f, 0.0f, 50.0f);
-		G.Part(MeshKind::Cube, 10.5f, 0, 70, 2, 18, 3, Color{ 255, 220, 60, 255 }, 0.4f, 0.0f, 0.0f, -50.0f);
-		// Goddard jetpack: twin rockets.
-		for (int s = -1; s <= 1; s += 2)
-		{
-			G.Part(MeshKind::Cylinder, -16, s * 8.0f, 66, 10, 10, 30, Color{ 210, 215, 225, 255 });
-			G.Part(MeshKind::Cone, -16, s * 8.0f, 86, 10, 10, 12, Color{ 225, 50, 40, 255 });
-			if (P.SigCd > 0.2f)
-			{
-				G.Part(MeshKind::Cone, -16, s * 8.0f, 40, 10, 10, 26 + std::sin(Time * 40.0f) * 6.0f, Color{ 255, 170, 40, 255 }, 1.0f, 180.0f);
-			}
-		}
-		// Shrink ray.
-		G.Part(MeshKind::Cube, AlongF(RA, 4), 20, AlongU(RA, 4), 12, 7, 16, Color{ 120, 175, 140, 255 }, 0.0f, RA - 180.0f);
-		G.Part(MeshKind::Cylinder, AlongF(RA, 14), 20, AlongU(RA, 14), 6, 6, 14, Color{ 200, 200, 210, 255 }, 0.0f, RA - 180.0f);
-		G.Part(MeshKind::Sphere, AlongF(RA, 22), 20, AlongU(RA, 22), 8, 8, 8, Color{ 255, 70, 70, 255 }, 0.9f);
-		break;
-	}
-	case HeroId::Timmy:
-	{
-		Humanoid(G, Skin, Shirt, Pants, White, Leg, RA, LA, true, 40.0f);
-		G.Part(MeshKind::Cylinder, 0, 0, 122, 40, 40, 14, Shirt);
-		G.Part(MeshKind::Sphere, -2, 0, 128, 36, 36, 18, Shirt);
-		G.Part(MeshKind::Cube, 17, 0, 117, 20, 32, 3, Shirt);
-		G.Part(MeshKind::Sphere, -6, 17, 110, 14, 10, 12, H.Hair);
-		G.Part(MeshKind::Sphere, -6, -17, 110, 14, 10, 12, H.Hair);
-		G.Part(MeshKind::Cube, 19, 2.5f, 94, 3, 4, 6, White);
-		G.Part(MeshKind::Cube, 19, -2.5f, 94, 3, 4, 6, White);
-		// Magic wand + Da Rules book.
-		G.Part(MeshKind::Cylinder, AlongF(RA, 12), 20, AlongU(RA, 12), 3, 3, 26, Color{ 30, 30, 35, 255 }, 0.0f, RA - 180.0f);
-		G.Part(MeshKind::Sphere, AlongF(RA, 26), 20, AlongU(RA, 26), 12, 12, 12, Color{ 255, 230, 70, 255 }, bAttack ? 1.0f : 0.7f);
-		G.Part(MeshKind::Cube, HandF(LA) + 4, -24, HandU(LA) + 4, 8, 22, 28, Color{ 135, 60, 165, 255 });
-		G.Part(MeshKind::Cube, HandF(LA) + 8.5f, -24, HandU(LA) + 8, 1, 14, 6, Color{ 240, 200, 80, 255 }, 0.3f);
-		// Cosmo & Wanda: orbiting, or the cloud-board while flying.
-		if (P.Flying)
-		{
-			G.Part(MeshKind::Sphere, 0, 0, -10, 120, 76, 30, Color{ 250, 250, 255, 255 }, 0.2f);
-			G.Part(MeshKind::Sphere, 34, 22, -6, 56, 50, 30, Color{ 200, 255, 210, 255 }, 0.2f);
-			G.Part(MeshKind::Sphere, 34, -22, -6, 56, 50, 30, Color{ 255, 205, 230, 255 }, 0.2f);
-		}
-		else
-		{
-			for (int k = 0; k < 2; ++k)
-			{
-				const float A = Time * 2.0f + k * 3.14159f;
-				const float Fx = std::cos(A) * 60.0f, Fy = std::sin(A) * 60.0f, Fz = 128.0f + std::sin(Time * 4.0f + k) * 8.0f;
-				const Color HairC = k == 0 ? Color{ 90, 210, 100, 255 } : Color{ 245, 120, 185, 255 };
-				const Color Body = k == 0 ? White : Color{ 250, 220, 80, 255 };
-				const float Flap = std::sin(Time * 30.0f) * 30.0f;
-				G.Part(MeshKind::Cylinder, Fx, Fy, Fz - 16, 10, 10, 16, Body);
-				G.Part(MeshKind::Sphere, Fx, Fy, Fz, 18, 18, 18, Color{ 250, 215, 185, 255 });
-				G.Part(MeshKind::Sphere, Fx - 2, Fy, Fz + 12, k == 0 ? 16.0f : 22.0f, k == 0 ? 16.0f : 22.0f, k == 0 ? 18.0f : 16.0f, HairC);
-				G.Part(MeshKind::Cone, Fx, Fy, Fz + 24, 8, 8, 10, Color{ 255, 220, 60, 255 }, 0.6f);
-				G.Part(MeshKind::Cube, Fx - 8, Fy + 8, Fz - 6, 2, 14, 10, Color{ 220, 240, 255, 255 }, 0.4f, 0.0f, 0.0f, 20.0f + Flap);
-				G.Part(MeshKind::Cube, Fx - 8, Fy - 8, Fz - 6, 2, 14, 10, Color{ 220, 240, 255, 255 }, 0.4f, 0.0f, 0.0f, -20.0f - Flap);
-			}
-		}
-		break;
-	}
-	case HeroId::Danny:
-	{
-		const Color Suit = Shirt;
-		Humanoid(G, Skin, Suit, Suit, White, Leg, RA, LA, true, 38.0f, !P.Flying);
-		G.Part(MeshKind::Cube, 0, 0, 83, 21, 24, 4, White);   // collar
-		G.Part(MeshKind::Cube, 0, 0, 48, 21, 31, 6, White);   // belt
-		G.Part(MeshKind::Cube, 10.5f, 0, 70, 2, 14, 12, White); // DP emblem
-		G.Part(MeshKind::Cube, 11.0f, 2, 70, 2, 4, 8, Suit);
-		G.Part(MeshKind::Sphere, -3, 0, 112, 40, 40, 24, H.Hair);
-		G.Part(MeshKind::Cone, -14, 0, 112, 14, 30, 24, H.Hair, 0.0f, 70.0f);
-		G.Part(MeshKind::Sphere, 16.5f, 6, 103, 7, 6, 8, Color{ 90, 255, 130, 255 }, 1.0f);
-		G.Part(MeshKind::Sphere, 16.5f, -6, 103, 7, 6, 8, Color{ 90, 255, 130, 255 }, 1.0f);
-		// Glowing ecto-energy hands.
-		G.Part(MeshKind::Sphere, HandF(RA), 20, HandU(RA), 14, 14, 14, Color{ 110, 255, 140, 255 }, 1.0f);
-		G.Part(MeshKind::Sphere, HandF(LA), -20, HandU(LA), 14, 14, 14, Color{ 110, 255, 140, 255 }, 1.0f);
-		if (P.Flying)
-		{
-			// Ghost tail replaces the legs in flight.
-			const float Sway = std::sin(Time * 5.0f) * 12.0f;
-			G.Part(MeshKind::Cone, -4, 0, 24, 30, 26, 54, Color{ 30, 30, 36, 255 }, 0.0f, 180.0f + Sway);
-			G.Part(MeshKind::Cone, -14 - Sway * 0.5f, 0, -8, 18, 16, 32, Color{ 120, 255, 200, 255 }, 0.7f, 200.0f + Sway * 1.5f);
-		}
-		break;
-	}
-	case HeroId::Jake:
-		if (P.Flying)
-		{
-			// American Dragon form: red with yellow belly and big wings.
-			Rig D = G;
-			D.Scale = P.H / 70.0f * 1.5f;
-			const Color Red = Tint(Color{ 205, 35, 30, 255 }), Belly{ 245, 200, 70, 255 }, Wing{ 150, 25, 25, 255 };
-			const float Flap = std::sin(Time * 8.0f) * 35.0f;
-			D.Part(MeshKind::Cube, 0, 0, 50, 70, 34, 34, Red);
-			D.Part(MeshKind::Cube, 2, 0, 42, 60, 26, 14, Belly);
-			D.Part(MeshKind::Cube, 42, 0, 64, 30, 22, 30, Red, 0.0f, -20.0f);
-			D.Part(MeshKind::Cube, 60, 0, 74, 30, 24, 22, Red);
-			D.Part(MeshKind::Cube, 76, 0, 70, 18, 18, 12, Red);
-			D.Part(MeshKind::Cone, 54, 9, 92, 7, 7, 20, Color{ 250, 225, 150, 255 }, 0.0f, 30.0f);
-			D.Part(MeshKind::Cone, 54, -9, 92, 7, 7, 20, Color{ 250, 225, 150, 255 }, 0.0f, 30.0f);
-			D.Part(MeshKind::Sphere, 70, 9, 80, 6, 6, 6, Color{ 255, 230, 80, 255 }, 1.0f);
-			D.Part(MeshKind::Sphere, 70, -9, 80, 6, 6, 6, Color{ 255, 230, 80, 255 }, 1.0f);
-			for (int s = -1; s <= 1; s += 2)
-			{
-				const float F = s * Flap;
-				D.Part(MeshKind::Cube, 4, s * 42.0f, 62 + std::sin(F * Deg2Rad) * 20, 50, 60, 4, Wing, 0.0f, 0.0f, 0.0f, -F);
-				D.Part(MeshKind::Cube, -6, s * 92.0f, 62 + std::sin(F * Deg2Rad) * 60, 40, 50, 3, Wing, 0.0f, 0.0f, 0.0f, -F * 1.3f);
-				D.Limb(10, s * 12.0f, 38, 9, 22, -40, Red);
-			}
-			for (int k = 0; k < 3; ++k)
-			{
-				D.Part(MeshKind::Cone, -48 - k * 26, 0, 46 - k * 4, 22 - k * 6, 22 - k * 6, 34, Red, 0.0f, 100.0f + std::sin(Time * 4 + k) * 10.0f);
-			}
-		}
-		else
-		{
-			Humanoid(G, Skin, Shirt, Pants, White, Leg, RA, LA);
-			G.Part(MeshKind::Cube, 10.5f, 0, 64, 2, 10, 36, Color{ 120, 120, 130, 255 }); // shirt under the jacket
-			G.Part(MeshKind::Sphere, -3, 0, 114, 38, 38, 22, H.Hair);
-			for (int k = 0; k < 5; ++k)
-			{
-				G.Part(MeshKind::Cone, -8 + k * 2, -12 + k * 6, 124, 12, 12, 22, k % 2 ? Color{ 80, 220, 120, 255 } : H.Hair, 0.0f, -10.0f - k * 4.0f);
-			}
-		}
-		break;
-	case HeroId::XJ9:
-	{
-		const Color Body = Shirt, Teal{ 70, 190, 205, 255 }, Joint{ 60, 70, 95, 255 };
-		G.Limb(0, 8, 42, 10, 40, Leg, Body);
-		G.Limb(0, -8, 42, 10, 40, -Leg, Body);
-		G.Part(MeshKind::Sphere, std::sin(Leg * Deg2Rad) * 20, 8, 22, 11, 11, 11, Joint);
-		G.Part(MeshKind::Sphere, -std::sin(Leg * Deg2Rad) * 20, -8, 22, 11, 11, 11, Joint);
-		G.Part(MeshKind::Cone, 0, 0, 42, 44, 44, 26, Teal, 0.0f, 180.0f);
-		G.Part(MeshKind::Cube, 0, 0, 64, 20, 26, 34, Body);
-		G.Part(MeshKind::Cube, 0, 0, 74, 21, 27, 6, Teal);
-		G.Part(MeshKind::Sphere, 10.5f, 0, 64, 3, 7, 7, Teal, 0.5f);
-		G.Limb(0, 19, 78, 9, 36, RA, Body);
-		G.Limb(0, -19, 78, 9, 36, LA, Body);
-		// Forearm missile launchers.
-		G.Part(MeshKind::Cylinder, AlongF(RA, -10), 25, AlongU(RA, -10), 8, 8, 18, Color{ 225, 60, 50, 255 }, 0.0f, RA - 180.0f);
-		G.Part(MeshKind::Cylinder, AlongF(LA, -10), -25, AlongU(LA, -10), 8, 8, 18, Color{ 225, 60, 50, 255 }, 0.0f, LA - 180.0f);
-		G.Part(MeshKind::Sphere, 0, 0, 100, 38, 36, 38, Body);
-		G.Part(MeshKind::Cube, -2, 0, 119, 32, 36, 8, Teal);
-		G.Part(MeshKind::Cube, -2, 22, 120, 12, 34, 7, Teal, 0.0f, 0.0f, 0.0f, 35.0f);
-		G.Part(MeshKind::Cube, -2, -22, 120, 12, 34, 7, Teal, 0.0f, 0.0f, 0.0f, -35.0f);
-		G.Part(MeshKind::Sphere, 15, 7, 102, 9, 9, 11, Color{ 245, 248, 255, 255 });
-		G.Part(MeshKind::Sphere, 15, -7, 102, 9, 9, 11, Color{ 245, 248, 255, 255 });
-		G.Part(MeshKind::Sphere, 18, 7, 102, 5, 5, 6, Color{ 50, 130, 220, 255 }, 0.6f);
-		G.Part(MeshKind::Sphere, 18, -7, 102, 5, 5, 6, Color{ 50, 130, 220, 255 }, 0.6f);
-		if (P.Flying)
-		{
-			const float Fl = 26.0f + std::sin(Time * 40.0f) * 6.0f;
-			G.Part(MeshKind::Cone, 0, 8, -12, 16, 16, Fl, Color{ 255, 190, 60, 255 }, 1.0f, 180.0f);
-			G.Part(MeshKind::Cone, 0, -8, -12, 16, 16, Fl, Color{ 255, 190, 60, 255 }, 1.0f, 180.0f);
-		}
-		break;
-	}
-	case HeroId::ElTigre:
-	{
-		const Color Suit{ 55, 40, 38, 255 }, Fur = Tint(Color{ 125, 78, 42, 255 }), Muzzle{ 235, 205, 155, 255 };
-		Humanoid(G, Fur, Tint(Suit), Tint(Color{ 85, 52, 32, 255 }), Color{ 30, 25, 25, 255 }, Leg, RA, LA, true, 38.0f);
-		G.Part(MeshKind::Cube, 0, 0, 84, 22, 32, 6, Color{ 200, 40, 40, 255 });   // red scarf
-		G.Part(MeshKind::Cube, 0, 0, 50, 21, 31, 6, Color{ 200, 40, 40, 255 });   // belt sash
-		G.Part(MeshKind::Sphere, 15, 0, 95, 16, 22, 12, Muzzle);
-		G.Part(MeshKind::Cube, 16, 0, 104, 6, 32, 9, Color{ 25, 20, 20, 255 });  // mask band
-		G.Part(MeshKind::Sphere, 18, 7, 104, 9, 9, 11, White);
-		G.Part(MeshKind::Sphere, 18, -7, 104, 9, 9, 11, White);
-		G.Part(MeshKind::Sphere, 21, 7, 104, 5, 5, 6, Color{ 70, 200, 90, 255 }, 0.4f);
-		G.Part(MeshKind::Sphere, 21, -7, 104, 5, 5, 6, Color{ 70, 200, 90, 255 }, 0.4f);
-		G.Part(MeshKind::Cone, -2, 13, 123, 13, 13, 18, Fur);
-		G.Part(MeshKind::Cone, -2, -13, 123, 13, 13, 18, Fur);
-		G.Part(MeshKind::Cone, 4, 20, 98, 10, 10, 18, White, 0.0f, 0.0f, 0.0f, 70.0f);
-		G.Part(MeshKind::Cone, 4, -20, 98, 10, 10, 18, White, 0.0f, 0.0f, 0.0f, -70.0f);
-		// Steel claws.
-		for (int k = -1; k <= 1; ++k)
-		{
-			G.Part(MeshKind::Cone, AlongF(RA, 12), 20 + k * 4.0f, AlongU(RA, 12), 5, 5, 22, Color{ 215, 220, 230, 255 }, 0.0f, RA - 180.0f);
-			G.Part(MeshKind::Cone, AlongF(LA, 12), -20 + k * 4.0f, AlongU(LA, 12), 5, 5, 22, Color{ 215, 220, 230, 255 }, 0.0f, LA - 180.0f);
-		}
-		break;
-	}
-	case HeroId::Ben:
-	{
-		Humanoid(G, Skin, Shirt, Pants, Color{ 40, 40, 40, 255 }, Leg, RA, LA);
-		G.Part(MeshKind::Cube, 10.5f, 0, 64, 2, 9, 38, Color{ 30, 30, 30, 255 });
-		G.Part(MeshKind::Sphere, -3, 0, 113, 38, 38, 24, H.Hair);
-		G.Part(MeshKind::Cone, 12, 6, 114, 14, 22, 18, H.Hair, 0.0f, -70.0f);
-		// Omnitrix on the left wrist.
-		G.Part(MeshKind::Cylinder, AlongF(LA, -8), -20, AlongU(LA, -8), 14, 14, 10, Color{ 35, 35, 40, 255 }, 0.0f, LA - 180.0f);
-		G.Part(MeshKind::Sphere, AlongF(LA, -8) + 4, -20, AlongU(LA, -8) + 3, 9, 9, 9, Color{ 90, 255, 90, 255 }, 1.0f);
-		break;
-	}
-	case HeroId::Aang:
-	{
-		const Color Orange{ 230, 110, 40, 255 }, Yellow = Shirt, Brown{ 140, 95, 55, 255 };
-		Humanoid(G, Skin, Yellow, Pants, Color{ 120, 80, 50, 255 }, Leg, RA, LA);
-		G.Part(MeshKind::Cube, -2, 0, 70, 24, 34, 26, Tint(Orange));             // orange top / cape
-		G.Part(MeshKind::Cube, 0, 0, 50, 22, 32, 8, Tint(Orange));
-		G.Part(MeshKind::Cube, 4, 0, 119, 28, 6, 4, Color{ 70, 160, 240, 255 }); // arrow
-		G.Part(MeshKind::Cube, 18, 0, 110, 6, 6, 12, Color{ 70, 160, 240, 255 });
-		if (P.Gliding)
-		{
-			G.Part(MeshKind::Cube, 0, 0, 150, 60, 130, 4, Orange);
-			G.Part(MeshKind::Cylinder, 0, 0, 150, 6, 6, 150, Brown, 0.0f, 90.0f);
-		}
-		else
-		{
-			// Glider staff held across the body.
-			G.Part(MeshKind::Cylinder, HandF(RA) + 4, 4, HandU(RA) + 6, 6, 6, 160, Brown, 0.0f, 0.0f, 0.0f, 75.0f);
-		}
-		if (P.ScooterTime > 0.0f)
-		{
-			G.Part(MeshKind::Sphere, 0, 0, -12, 74, 74, 54, Color{ 170, 210, 255, 255 }, 0.5f, Time * 500.0f);
-		}
-		break;
-	}
-	default:
-		Humanoid(G, Skin, Shirt, Pants, Color{ 40, 40, 40, 255 }, Leg, RA, LA);
-		break;
-	}
+	RenderHero3D(R, Alpha, bHurt);
 }

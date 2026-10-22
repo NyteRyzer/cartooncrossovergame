@@ -268,7 +268,7 @@ void FinalizeBlock(Block& B)
 	const bool Upright = std::fmod(std::fabs(B.PitchDeg), 360.0f) < 0.01f;
 	B.VerticalCylinder = B.Kind == Shape::Cylinder && Upright;
 	// Pitched shapes and cones are decorative (ferris wheel, platform underside).
-	if (!Upright || B.Kind == Shape::Cone || B.Kind == Shape::Plane)
+	if (!Upright || B.Kind == Shape::Cone || B.Kind == Shape::Plane || B.Kind == Shape::Pyramid)
 	{
 		B.Solid = false;
 	}
