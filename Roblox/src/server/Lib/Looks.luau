@@ -447,7 +447,8 @@ end
 
 -- Jake's dragon: built hidden, shown while flying (the human body hides).
 local function dragonGear(folder, parts, scale)
-	local root = parts.Root
+	-- Welded to the LowerTorso so the Animator's Root transform banks and pitches it.
+	local root = parts.LowerTorso or parts.Root
 	local red, belly, wingC = Color3.fromRGB(205, 35, 30), Color3.fromRGB(245, 200, 70), Color3.fromRGB(150, 25, 25)
 	local k = scale * 1.6
 	local group = Instance.new("Folder")
@@ -486,15 +487,9 @@ function Looks.apply(character, heroId, form)
 	if not humanoid then
 		return
 	end
-	local old = character:FindFirstChild(GEAR)
-	if old then
-		old:Destroy()
-	end
-	for _, d in ipairs(character:GetDescendants()) do
-		if (d:IsA("Fire") or d:IsA("Motor6D") and (d.Name == "StaffJoint" or d.Name:sub(1, 8) == "ExtraArm" or d.Name:sub(1, 10) == "DragonWing")) then
-			d:Destroy()
-		end
-	end
+	-- Newest call wins if several overlap (quick hero swaps, form changes).
+	local gen = (character:GetAttribute("LookGen") or 0) + 1
+	character:SetAttribute("LookGen", gen)
 	local hero = Config.Heroes[heroId] or Config.Heroes.Jimmy
 	local look = form and formLook(form) or hero.Look
 	local r15 = humanoid.RigType == Enum.HumanoidRigType.R15
@@ -502,8 +497,18 @@ function Looks.apply(character, heroId, form)
 		setScale(humanoid, look.Height or 1, look.Width or 1, look.HeadScale or 1)
 		-- Let the rig rescale before measuring parts for the gear.
 		task.wait(0.1)
-		if not character.Parent then
+		if not character.Parent or character:GetAttribute("LookGen") ~= gen then
 			return
+		end
+	end
+	for _, old in ipairs(character:GetChildren()) do
+		if old.Name == GEAR then
+			old:Destroy()
+		end
+	end
+	for _, d in ipairs(character:GetDescendants()) do
+		if d:IsA("Fire") or (d:IsA("Motor6D") and (d.Name == "StaffJoint" or d.Name:sub(1, 8) == "ExtraArm" or d.Name:sub(1, 10) == "DragonWing")) then
+			d:Destroy()
 		end
 	end
 	colorBody(character, look)

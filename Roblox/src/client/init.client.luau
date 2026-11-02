@@ -5,7 +5,7 @@
 local controllers = {}
 local order = { "Input", "Hud", "CameraRig", "Movement", "Animator", "Effects", "Companions", "Vehicle" }
 for _, name in ipairs(order) do
-	local module = script.Controllers:FindFirstChild(name)
+	local module = script:WaitForChild("Controllers"):WaitForChild(name, 10)
 	if module then
 		controllers[name] = require(module)
 	else

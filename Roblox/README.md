@@ -66,7 +66,7 @@ see and edit them in Studio), along with every script.
 
 | Action | Keyboard / mouse |
 |---|---|
-| Move / look | WASD / mouse (cursor locked; **Esc** frees it) |
+| Move / look | WASD / mouse (cursor locked; **M** or Esc frees it) |
 | Jump / ascend | Space (jump at a wall to wall-jump; hold while falling to glide as Aang) |
 | Descend / ground pound | Ctrl or C (in the air: ground pound) |
 | Sprint / boost | Shift |

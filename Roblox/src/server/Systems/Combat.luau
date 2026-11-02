@@ -21,6 +21,7 @@ local nextShot = 1
 local shockwaves = {}
 local breathing = {} -- [player] = aim
 local regenAt = {}   -- [player] = time
+local breathTick = 0
 
 local function charOf(player)
 	local character = player.Character
@@ -327,7 +328,10 @@ local function dropAnvil(player, target)
 end
 
 local function earthPillar(player, root)
-	local down = workspace:Raycast(root.Position, Vector3.new(0, -12, 0))
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { root.Parent, workspace:FindFirstChild("Enemies") }
+	local down = workspace:Raycast(root.Position, Vector3.new(0, -12, 0), params)
 	local ground = down and down.Position.Y or root.Position.Y - 3
 	local rock = Instance.new("Part")
 	rock.Name = "EarthPillar"
@@ -405,7 +409,15 @@ end
 local function onPound(player)
 	local st = PlayerState.get(player)
 	local character, _, root = charOf(player)
-	if not st or not character or not PlayerState.ready(st, "Pound", 0.7) then
+	if not st or not character or not canAttack(st, character) then
+		return
+	end
+	-- Only a pound the server saw start, from at least a few studs up.
+	if not st.PoundAt or os.clock() - st.PoundAt > 3 or not st.PoundStartY or st.PoundStartY - root.Position.Y < 4 then
+		return
+	end
+	st.PoundAt = nil
+	if not PlayerState.ready(st, "Pound", 0.7) then
 		return
 	end
 	local scale = math.max(1, bodyScale(character))
@@ -435,15 +447,23 @@ function Combat.start()
 				table.remove(shockwaves, i)
 			end
 		end
+		-- Fire breath: energy drains every frame, damage ticks at 10 Hz.
+		breathTick = breathTick + dt
+		local tick = breathTick >= 0.1
+		if tick then
+			breathTick = 0
+		end
 		for player, aim in pairs(breathing) do
 			local st = PlayerState.get(player)
 			local character, _, root = charOf(player)
-			if not st or not character or st.Energy <= 0 then
+			if not st or not character or st.Energy <= 0 or not canAttack(st, character) then
 				breathing[player] = nil
 				Net.fireAll("Fx", { Kind = "Breath", Player = player, On = false })
 			else
 				st.Energy = math.max(0, st.Energy - 28 * dt)
-				coneDamage(player, root, aim, 27, 25, 70 * dt, 3)
+				if tick then
+					coneDamage(player, root, aim, 27, 25, 7, 3)
+				end
 			end
 		end
 		local now = os.clock()

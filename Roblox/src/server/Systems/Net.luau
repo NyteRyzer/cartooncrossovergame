@@ -55,7 +55,7 @@ function Net.on(name, rate, handler)
 	local e = events[name]
 	assert(e, "unknown remote " .. tostring(name))
 	e.OnServerEvent:Connect(function(player, ...)
-		if not allow(player, name, rate, math.max(2, rate)) then
+		if player.Parent == nil or not allow(player, name, rate, math.max(2, rate)) then
 			return
 		end
 		local ok, err = pcall(handler, player, ...)

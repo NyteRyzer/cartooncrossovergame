@@ -309,6 +309,9 @@ function Effects.start()
 	fxFolder.Name = "LocalFx"
 	fxFolder.Parent = workspace
 	ReplicatedStorage:WaitForChild("Remotes").Fx.OnClientEvent:Connect(onFx)
+	Players.PlayerRemoving:Connect(function(p)
+		setBreath(p, false)
+	end)
 	local accum = 0
 	RunService.RenderStepped:Connect(function(dt)
 		for id, s in pairs(shots) do

@@ -87,7 +87,8 @@ function CameraRig.start()
 		end
 	end)
 	UserInputService.InputBegan:Connect(function(input)
-		if input.KeyCode == Enum.KeyCode.Escape then
+		-- Esc may be taken by Roblox's menu, so M also frees / locks the mouse.
+		if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.M then
 			cursorFree = not cursorFree
 		end
 	end)

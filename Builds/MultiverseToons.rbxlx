@@ -301320,7 +301320,7 @@ return {
 local systems = {}
 local order = { "Net", "Players", "Heroes", "World", "Enemies", "Combat", "Collectibles", "Courses" }
 for _, name in ipairs(order) do
-	local module = script.Systems:FindFirstChild(name)
+	local module = script:WaitForChild("Systems"):FindFirstChild(name)
 	if module then
 		systems[name] = require(module)
 	else
@@ -301797,7 +301797,8 @@ end
 
 -- Jake's dragon: built hidden, shown while flying (the human body hides).
 local function dragonGear(folder, parts, scale)
-	local root = parts.Root
+	-- Welded to the LowerTorso so the Animator's Root transform banks and pitches it.
+	local root = parts.LowerTorso or parts.Root
 	local red, belly, wingC = Color3.fromRGB(205, 35, 30), Color3.fromRGB(245, 200, 70), Color3.fromRGB(150, 25, 25)
 	local k = scale * 1.6
 	local group = Instance.new("Folder")
@@ -301836,15 +301837,9 @@ function Looks.apply(character, heroId, form)
 	if not humanoid then
 		return
 	end
-	local old = character:FindFirstChild(GEAR)
-	if old then
-		old:Destroy()
-	end
-	for _, d in ipairs(character:GetDescendants()) do
-		if (d:IsA("Fire") or d:IsA("Motor6D") and (d.Name == "StaffJoint" or d.Name:sub(1, 8) == "ExtraArm" or d.Name:sub(1, 10) == "DragonWing")) then
-			d:Destroy()
-		end
-	end
+	-- Newest call wins if several overlap (quick hero swaps, form changes).
+	local gen = (character:GetAttribute("LookGen") or 0) + 1
+	character:SetAttribute("LookGen", gen)
 	local hero = Config.Heroes[heroId] or Config.Heroes.Jimmy
 	local look = form and formLook(form) or hero.Look
 	local r15 = humanoid.RigType == Enum.HumanoidRigType.R15
@@ -301852,8 +301847,18 @@ function Looks.apply(character, heroId, form)
 		setScale(humanoid, look.Height or 1, look.Width or 1, look.HeadScale or 1)
 		-- Let the rig rescale before measuring parts for the gear.
 		task.wait(0.1)
-		if not character.Parent then
+		if not character.Parent or character:GetAttribute("LookGen") ~= gen then
 			return
+		end
+	end
+	for _, old in ipairs(character:GetChildren()) do
+		if old.Name == GEAR then
+			old:Destroy()
+		end
+	end
+	for _, d in ipairs(character:GetDescendants()) do
+		if d:IsA("Fire") or (d:IsA("Motor6D") and (d.Name == "StaffJoint" or d.Name:sub(1, 8) == "ExtraArm" or d.Name:sub(1, 10) == "DragonWing")) then
+			d:Destroy()
 		end
 	end
 	colorBody(character, look)
@@ -302126,6 +302131,7 @@ local nextShot = 1
 local shockwaves = {}
 local breathing = {} -- [player] = aim
 local regenAt = {}   -- [player] = time
+local breathTick = 0
 
 local function charOf(player)
 	local character = player.Character
@@ -302432,7 +302438,10 @@ local function dropAnvil(player, target)
 end
 
 local function earthPillar(player, root)
-	local down = workspace:Raycast(root.Position, Vector3.new(0, -12, 0))
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { root.Parent, workspace:FindFirstChild("Enemies") }
+	local down = workspace:Raycast(root.Position, Vector3.new(0, -12, 0), params)
 	local ground = down and down.Position.Y or root.Position.Y - 3
 	local rock = Instance.new("Part")
 	rock.Name = "EarthPillar"
@@ -302510,7 +302519,15 @@ end
 local function onPound(player)
 	local st = PlayerState.get(player)
 	local character, _, root = charOf(player)
-	if not st or not character or not PlayerState.ready(st, "Pound", 0.7) then
+	if not st or not character or not canAttack(st, character) then
+		return
+	end
+	-- Only a pound the server saw start, from at least a few studs up.
+	if not st.PoundAt or os.clock() - st.PoundAt > 3 or not st.PoundStartY or st.PoundStartY - root.Position.Y < 4 then
+		return
+	end
+	st.PoundAt = nil
+	if not PlayerState.ready(st, "Pound", 0.7) then
 		return
 	end
 	local scale = math.max(1, bodyScale(character))
@@ -302540,15 +302557,23 @@ function Combat.start()
 				table.remove(shockwaves, i)
 			end
 		end
+		-- Fire breath: energy drains every frame, damage ticks at 10 Hz.
+		breathTick = breathTick + dt
+		local tick = breathTick >= 0.1
+		if tick then
+			breathTick = 0
+		end
 		for player, aim in pairs(breathing) do
 			local st = PlayerState.get(player)
 			local character, _, root = charOf(player)
-			if not st or not character or st.Energy <= 0 then
+			if not st or not character or st.Energy <= 0 or not canAttack(st, character) then
 				breathing[player] = nil
 				Net.fireAll("Fx", { Kind = "Breath", Player = player, On = false })
 			else
 				st.Energy = math.max(0, st.Energy - 28 * dt)
-				coneDamage(player, root, aim, 27, 25, 70 * dt, 3)
+				if tick then
+					coneDamage(player, root, aim, 27, 25, 7, 3)
+				end
 			end
 		end
 		local now = os.clock()
@@ -302753,7 +302778,10 @@ local function makeGremlin(pos)
 end
 
 function Enemies.spawn(pos, riftIndex)
-	local down = workspace:Raycast(pos + Vector3.new(0, 20, 0), Vector3.new(0, -80, 0))
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { folder }
+	local down = workspace:Raycast(pos + Vector3.new(0, 20, 0), Vector3.new(0, -80, 0), params)
 	if down then
 		pos = down.Position + Vector3.new(0, 4, 0)
 	end
@@ -303072,24 +303100,34 @@ local function onState(player, state)
 	local hero = heroDef(st)
 	for key, kind in pairs(STATE_KEYS) do
 		local v = state[key]
-		if type(v) == kind then
+		if type(v) == kind and not (kind == "number" and v ~= v) then
 			if kind == "number" then
-				v = math.clamp(v, -400, 400)
+				v = math.clamp(v, -90, 90)
+				if key == "DodgeSide" then
+					v = v < 0 and -1 or 1
+				end
 			end
 			-- Only heroes who can fly report flight; only Danny goes intangible.
 			if key == "Flying" and v and not (hero.CanFly and not PlayerState.form(st)) then
 				v = false
 			end
 			if key == "Intangible" then
-				v = v and st.Hero == "Danny" and st.Energy > 0
+				-- Same 15-energy threshold as the client to switch on.
+				v = v and st.Hero == "Danny" and (st.Intangible and st.Energy > 0 or st.Energy >= 15)
 				st.Intangible = v
+			end
+			if key == "Pounding" and v and not character:GetAttribute("MvPounding") then
+				local root = character:FindFirstChild("HumanoidRootPart")
+				st.PoundStartY = root and root.Position.Y or nil
+				st.PoundAt = os.clock()
 			end
 			if key == "Dodge" and v and not character:GetAttribute("MvDodge") then
 				-- Server-side dodge cooldown bounds the immunity window.
 				local now = os.clock()
+				-- Immunity is much shorter than the cooldown, so toggling can't chain it.
 				if now - st.LastDodge >= Config.Moves.DodgeCooldown * 0.9 then
 					st.LastDodge = now
-					st.DodgeUntil = now + Config.Moves.BarrelRollTime
+					st.DodgeUntil = now + 0.25
 				else
 					v = false
 				end
@@ -303264,7 +303302,7 @@ function Net.on(name, rate, handler)
 	local e = events[name]
 	assert(e, "unknown remote " .. tostring(name))
 	e.OnServerEvent:Connect(function(player, ...)
-		if not allow(player, name, rate, math.max(2, rate)) then
+		if player.Parent == nil or not allow(player, name, rate, math.max(2, rate)) then
 			return
 		end
 		local ok, err = pcall(handler, player, ...)
@@ -303591,6 +303629,9 @@ local function buildHoverCar(pos, yaw)
 		else
 			lv.MaxForce = 0
 			lv.VectorVelocity = Vector3.zero
+			-- Keep the heading the driver left it at (their orientation target was local).
+			local _, yaw = body.CFrame:ToEulerAnglesYXZ()
+			ao.CFrame = CFrame.Angles(0, yaw, 0)
 			pcall(function()
 				body:SetNetworkOwnershipAuto()
 			end)
@@ -303676,7 +303717,7 @@ return World
 local controllers = {}
 local order = { "Input", "Hud", "CameraRig", "Movement", "Animator", "Effects", "Companions", "Vehicle" }
 for _, name in ipairs(order) do
-	local module = script.Controllers:FindFirstChild(name)
+	local module = script:WaitForChild("Controllers"):WaitForChild(name, 10)
 	if module then
 		controllers[name] = require(module)
 	else
@@ -303745,6 +303786,10 @@ local function cacheFor(character)
 	if c and c.Gear and c.Gear.Parent then
 		return c
 	end
+	-- No gear yet (still being dressed): retry a few times a second, not every frame.
+	if c and not c.Gear and os.clock() < (c.RetryAt or 0) then
+		return c
+	end
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid or humanoid.RigType ~= Enum.HumanoidRigType.R15 then
 		return nil
@@ -303758,6 +303803,8 @@ local function cacheFor(character)
 		c.Joints[key] = part and part:FindFirstChild(spec[2])
 	end
 	c.Gear = character:FindFirstChild("HeroGear")
+	c.RetryAt = os.clock() + 0.3
+	c.Spinner, c.SpinBase = nil, nil
 	c.Toggles = {}
 	c.Extra = {}
 	if c.Gear then
@@ -304148,7 +304195,8 @@ function CameraRig.start()
 		end
 	end)
 	UserInputService.InputBegan:Connect(function(input)
-		if input.KeyCode == Enum.KeyCode.Escape then
+		-- Esc may be taken by Roblox's menu, so M also frees / locks the mouse.
+		if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.M then
 			cursorFree = not cursorFree
 		end
 	end)
@@ -304723,6 +304771,9 @@ function Effects.start()
 	fxFolder.Name = "LocalFx"
 	fxFolder.Parent = workspace
 	ReplicatedStorage:WaitForChild("Remotes").Fx.OnClientEvent:Connect(onFx)
+	Players.PlayerRemoving:Connect(function(p)
+		setBreath(p, false)
+	end)
 	local accum = 0
 	RunService.RenderStepped:Connect(function(dt)
 		for id, s in pairs(shots) do
@@ -305018,7 +305069,7 @@ local function build()
 		"WASD move   Mouse look   Space jump / ascend (jump at walls to wall-jump)   Ctrl or C descend   Shift sprint / boost",
 		"Click attack (3-hit combos)   Q signature   R Ghost Wail / Earth Pillar   F ultimate   Tab fly (flyers)",
 		"V or Alt dodge / air dash / barrel roll   Ctrl in the air: ground pound   B emote   Hold Space falling: glide (Aang)",
-		"E terminals (swap hero / travel) and Jimmy's hover car   P return to the Nexus   Esc free the mouse",
+		"E terminals (swap hero / travel) and Jimmy's hover car   P return to the Nexus   M (or Esc) free the mouse",
 		"Ben: 1/2/3 transform, Q Omnitrix dial, G Master Control Glitch, F Way Big (full meter)",
 	}
 	for i, text in ipairs(lines) do
@@ -305160,7 +305211,6 @@ local ACTIONS = {
 	Glitch = { { Enum.KeyCode.G }, nil },
 	Recall = { { Enum.KeyCode.P, Enum.KeyCode.DPadDown }, nil },
 	Help = { { Enum.KeyCode.F1 }, nil },
-	Art = { { Enum.KeyCode.M }, nil },
 }
 
 local function emit(name, down)
@@ -305759,6 +305809,11 @@ local function onDown(down)
 		S.Gliding = false
 		S.FlipTime = 0
 		S.Dodge = 0
+		-- The server only accepts a pound it saw start, so report it right away.
+		local report = table.clone(lastSent)
+		report.Pounding = true
+		lastSent = report
+		fire("State", report)
 	end
 end
 
@@ -305785,8 +305840,14 @@ local function onJumpRequest()
 		S.JumpCut = true
 		S.Jumped = true
 		S.EmoteTime = 0
+		S.JumpReleased = false
 		return
 	end
+	-- JumpRequest repeats while the key is held: air moves need a fresh press.
+	if not S.JumpReleased then
+		return
+	end
+	S.JumpReleased = false
 	-- Coyote time: just walked off a ledge.
 	if not S.Jumped and S.Coyote > 0 then
 		root.AssemblyLinearVelocity = Vector3.new(v.X, jumpV, v.Z)
@@ -306034,6 +306095,9 @@ local function step(dt)
 		if humanoid:GetState() == Enum.HumanoidStateType.Jumping then
 			S.Jumped = true
 		end
+	end
+	if not Input.jumpHeld() then
+		S.JumpReleased = true
 	end
 	-- Short hop: let go of jump early.
 	if S.JumpCut and not Input.jumpHeld() and vel.Y > 0 and not S.Grounded then
@@ -306365,9 +306429,22 @@ return Vehicle
 <Item class="StarterCharacterScripts" referent="RBX18841"><Properties>
 <string name="Name">StarterCharacterScripts</string>
 </Properties>
+<Item class="LocalScript" referent="RBX18842"><Properties>
+<string name="Name">Animate</string>
+<ProtectedString name="Source"><![CDATA[-- Replaced by Client/Controllers/Animator (procedural animation).
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="Script" referent="RBX18843"><Properties>
+<string name="Name">Health</string>
+<ProtectedString name="Source"><![CDATA[-- Health regeneration is handled by Server/Systems/Combat.
+]]></ProtectedString>
+<token name="RunContext">0</token>
+</Properties>
 </Item>
 </Item>
-<Item class="StarterGui" referent="RBX18842"><Properties>
+</Item>
+<Item class="StarterGui" referent="RBX18844"><Properties>
 <string name="Name">StarterGui</string>
 </Properties>
 </Item>

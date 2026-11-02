@@ -192,6 +192,9 @@ local function buildHoverCar(pos, yaw)
 		else
 			lv.MaxForce = 0
 			lv.VectorVelocity = Vector3.zero
+			-- Keep the heading the driver left it at (their orientation target was local).
+			local _, yaw = body.CFrame:ToEulerAnglesYXZ()
+			ao.CFrame = CFrame.Angles(0, yaw, 0)
 			pcall(function()
 				body:SetNetworkOwnershipAuto()
 			end)

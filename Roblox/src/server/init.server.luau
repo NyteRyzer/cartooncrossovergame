@@ -5,7 +5,7 @@
 local systems = {}
 local order = { "Net", "Players", "Heroes", "World", "Enemies", "Combat", "Collectibles", "Courses" }
 for _, name in ipairs(order) do
-	local module = script.Systems:FindFirstChild(name)
+	local module = script:WaitForChild("Systems"):FindFirstChild(name)
 	if module then
 		systems[name] = require(module)
 	else

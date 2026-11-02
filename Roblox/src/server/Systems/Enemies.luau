@@ -78,7 +78,10 @@ local function makeGremlin(pos)
 end
 
 function Enemies.spawn(pos, riftIndex)
-	local down = workspace:Raycast(pos + Vector3.new(0, 20, 0), Vector3.new(0, -80, 0))
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { folder }
+	local down = workspace:Raycast(pos + Vector3.new(0, 20, 0), Vector3.new(0, -80, 0), params)
 	if down then
 		pos = down.Position + Vector3.new(0, 4, 0)
 	end

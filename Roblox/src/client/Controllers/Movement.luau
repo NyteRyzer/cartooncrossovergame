@@ -496,6 +496,11 @@ local function onDown(down)
 		S.Gliding = false
 		S.FlipTime = 0
 		S.Dodge = 0
+		-- The server only accepts a pound it saw start, so report it right away.
+		local report = table.clone(lastSent)
+		report.Pounding = true
+		lastSent = report
+		fire("State", report)
 	end
 end
 
@@ -522,8 +527,14 @@ local function onJumpRequest()
 		S.JumpCut = true
 		S.Jumped = true
 		S.EmoteTime = 0
+		S.JumpReleased = false
 		return
 	end
+	-- JumpRequest repeats while the key is held: air moves need a fresh press.
+	if not S.JumpReleased then
+		return
+	end
+	S.JumpReleased = false
 	-- Coyote time: just walked off a ledge.
 	if not S.Jumped and S.Coyote > 0 then
 		root.AssemblyLinearVelocity = Vector3.new(v.X, jumpV, v.Z)
@@ -771,6 +782,9 @@ local function step(dt)
 		if humanoid:GetState() == Enum.HumanoidStateType.Jumping then
 			S.Jumped = true
 		end
+	end
+	if not Input.jumpHeld() then
+		S.JumpReleased = true
 	end
 	-- Short hop: let go of jump early.
 	if S.JumpCut and not Input.jumpHeld() and vel.Y > 0 and not S.Grounded then

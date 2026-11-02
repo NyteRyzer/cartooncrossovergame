@@ -552,7 +552,12 @@ def main():
     w.open("StarterPlayerScripts", [p_string("Name", "StarterPlayerScripts")])
     write_init_container(w, os.path.join(ROBLOX, "src", "client"), "Client", "init.client.luau", "LocalScript")
     w.close()
-    w.leaf("StarterCharacterScripts", [p_string("Name", "StarterCharacterScripts")])
+    # Empty placeholders replace Roblox's default Animate (procedural animation
+    # drives the joints) and Health (Combat handles regeneration).
+    w.open("StarterCharacterScripts", [p_string("Name", "StarterCharacterScripts")])
+    w.leaf("LocalScript", [p_string("Name", "Animate"), p_source("-- Replaced by Client/Controllers/Animator (procedural animation).\n")])
+    w.leaf("Script", [p_string("Name", "Health"), p_source("-- Health regeneration is handled by Server/Systems/Combat.\n"), p_token("RunContext", 0)])
+    w.close()
     w.close()
     w.leaf("StarterGui", [p_string("Name", "StarterGui")])
 

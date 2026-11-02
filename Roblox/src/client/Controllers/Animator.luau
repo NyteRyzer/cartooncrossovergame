@@ -41,6 +41,10 @@ local function cacheFor(character)
 	if c and c.Gear and c.Gear.Parent then
 		return c
 	end
+	-- No gear yet (still being dressed): retry a few times a second, not every frame.
+	if c and not c.Gear and os.clock() < (c.RetryAt or 0) then
+		return c
+	end
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid or humanoid.RigType ~= Enum.HumanoidRigType.R15 then
 		return nil
@@ -54,6 +58,8 @@ local function cacheFor(character)
 		c.Joints[key] = part and part:FindFirstChild(spec[2])
 	end
 	c.Gear = character:FindFirstChild("HeroGear")
+	c.RetryAt = os.clock() + 0.3
+	c.Spinner, c.SpinBase = nil, nil
 	c.Toggles = {}
 	c.Extra = {}
 	if c.Gear then

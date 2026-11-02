@@ -103,24 +103,34 @@ local function onState(player, state)
 	local hero = heroDef(st)
 	for key, kind in pairs(STATE_KEYS) do
 		local v = state[key]
-		if type(v) == kind then
+		if type(v) == kind and not (kind == "number" and v ~= v) then
 			if kind == "number" then
-				v = math.clamp(v, -400, 400)
+				v = math.clamp(v, -90, 90)
+				if key == "DodgeSide" then
+					v = v < 0 and -1 or 1
+				end
 			end
 			-- Only heroes who can fly report flight; only Danny goes intangible.
 			if key == "Flying" and v and not (hero.CanFly and not PlayerState.form(st)) then
 				v = false
 			end
 			if key == "Intangible" then
-				v = v and st.Hero == "Danny" and st.Energy > 0
+				-- Same 15-energy threshold as the client to switch on.
+				v = v and st.Hero == "Danny" and (st.Intangible and st.Energy > 0 or st.Energy >= 15)
 				st.Intangible = v
+			end
+			if key == "Pounding" and v and not character:GetAttribute("MvPounding") then
+				local root = character:FindFirstChild("HumanoidRootPart")
+				st.PoundStartY = root and root.Position.Y or nil
+				st.PoundAt = os.clock()
 			end
 			if key == "Dodge" and v and not character:GetAttribute("MvDodge") then
 				-- Server-side dodge cooldown bounds the immunity window.
 				local now = os.clock()
+				-- Immunity is much shorter than the cooldown, so toggling can't chain it.
 				if now - st.LastDodge >= Config.Moves.DodgeCooldown * 0.9 then
 					st.LastDodge = now
-					st.DodgeUntil = now + Config.Moves.BarrelRollTime
+					st.DodgeUntil = now + 0.25
 				else
 					v = false
 				end

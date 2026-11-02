@@ -29,7 +29,6 @@ local ACTIONS = {
 	Glitch = { { Enum.KeyCode.G }, nil },
 	Recall = { { Enum.KeyCode.P, Enum.KeyCode.DPadDown }, nil },
 	Help = { { Enum.KeyCode.F1 }, nil },
-	Art = { { Enum.KeyCode.M }, nil },
 }
 
 local function emit(name, down)

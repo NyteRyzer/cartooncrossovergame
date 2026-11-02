@@ -244,7 +244,7 @@ local function build()
 		"WASD move   Mouse look   Space jump / ascend (jump at walls to wall-jump)   Ctrl or C descend   Shift sprint / boost",
 		"Click attack (3-hit combos)   Q signature   R Ghost Wail / Earth Pillar   F ultimate   Tab fly (flyers)",
 		"V or Alt dodge / air dash / barrel roll   Ctrl in the air: ground pound   B emote   Hold Space falling: glide (Aang)",
-		"E terminals (swap hero / travel) and Jimmy's hover car   P return to the Nexus   Esc free the mouse",
+		"E terminals (swap hero / travel) and Jimmy's hover car   P return to the Nexus   M (or Esc) free the mouse",
 		"Ben: 1/2/3 transform, Q Omnitrix dial, G Master Control Glitch, F Way Big (full meter)",
 	}
 	for i, text in ipairs(lines) do
