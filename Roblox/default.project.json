@@ -1,0 +1,24 @@
+{
+  "name": "MultiverseToons",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Shared": { "$path": "src/shared" }
+    },
+    "ServerScriptService": {
+      "Server": { "$path": "src/server" }
+    },
+    "StarterPlayer": {
+      "$properties": {
+        "LoadCharacterAppearance": false,
+        "CharacterUseJumpPower": false,
+        "CharacterJumpHeight": 7.5,
+        "CharacterWalkSpeed": 21,
+        "EnableMouseLockOption": false
+      },
+      "StarterPlayerScripts": {
+        "Client": { "$path": "src/client" }
+      }
+    }
+  }
+}

@@ -8,6 +8,11 @@ from the Nexus Observatory.
 - **Architecture, world scale, system specs, status:** [docs/TECH_DESIGN.md](docs/TECH_DESIGN.md)
 - **Cel-shading and per-show line art:** [docs/RENDERING.md](docs/RENDERING.md)
 
+## Play it on Roblox
+
+A Roblox version lives in [`Roblox/`](Roblox/README.md). Open **`Builds/MultiverseToons.rbxlx`** in Roblox Studio and press Play.
+It includes all 8 heroes, both worlds, flight, combat, and multiplayer.
+
 ## Play the prototype (Windows, macOS, Linux)
 
 Grab your platform from the **[prototype-latest release](../../releases/tag/prototype-latest)**

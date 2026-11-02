@@ -900,3 +900,41 @@ void Game::RenderShards(ToonRenderer& R)
 		}
 	}
 }
+
+// One line per block: kind cx cy cz sx sy sz yaw pitch r g b a emissive solid roof rr rg rb flags label
+// (UE cm, degrees). flags: g = course gate, h = hidden in the prototype (volumes, animated props).
+bool Game::ExportWorld(const std::string& Dir) const
+{
+	for (size_t Li = 0; Li < Levels.size(); ++Li)
+	{
+		const Level& L = Levels[Li];
+		const std::string Path = Dir + "/" + L.FileStem + ".world";
+		std::FILE* F = std::fopen(Path.c_str(), "w");
+		if (!F)
+		{
+			return false;
+		}
+		std::fprintf(F, "level %s\n", L.Name.c_str());
+		std::fprintf(F, "start %.1f %.1f %.1f %.1f\n", L.Start.x, L.Start.y, L.Start.z, L.StartYaw);
+		std::fprintf(F, "bounds %.1f %.1f %.1f %.1f %.1f %.1f\n", L.BoundsMin.x, L.BoundsMin.y, L.BoundsMin.z, L.BoundsMax.x, L.BoundsMax.y, L.BoundsMax.z);
+		for (const Marker& M : L.Markers)
+		{
+			std::fprintf(F, "marker %s %.1f %.1f %.1f %.1f %s\n", M.Class.c_str(), M.Location.x, M.Location.y, M.Location.z, M.YawDeg, M.Label.c_str());
+		}
+		auto Write = [&](const Block& B) {
+			const BlockStyle S = StyleFor(B, static_cast<int>(Li));
+			const Color Roof = RoofColorFor(B);
+			std::string Flags = std::string(S.Gate ? "g" : "") + (S.Hidden ? "h" : "");
+			if (Flags.empty()) Flags = "-";
+			std::fprintf(F, "block %d %.1f %.1f %.1f %.1f %.1f %.1f %.2f %.2f %d %d %d %d %.2f %d %.1f %d %d %d %s %s\n",
+			             static_cast<int>(B.Kind), B.Center.x, B.Center.y, B.Center.z, B.Size.x, B.Size.y, B.Size.z, B.YawDeg, B.PitchDeg,
+			             S.Tint.r, S.Tint.g, S.Tint.b, S.Tint.a, S.Emissive, B.Solid && !B.Decor ? 1 : 0, B.RoofHeight, Roof.r, Roof.g, Roof.b,
+			             Flags.c_str(), B.Label.empty() ? "-" : B.Label.c_str());
+		};
+		for (const Block& B : L.Blocks) Write(B);
+		for (const Block& B : L.Decor) Write(B);
+		std::fclose(F);
+		std::printf("Exported %s (%zu blocks, %zu decor)\n", Path.c_str(), L.Blocks.size(), L.Decor.size());
+	}
+	return true;
+}

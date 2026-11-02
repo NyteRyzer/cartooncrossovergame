@@ -171,6 +171,8 @@ class Game
 public:
 	bool Init(const std::string& DataDir, std::string& Error);
 	void Shutdown();
+	// Writes every level (blocks, set dressing, markers) as text for Roblox/tools/build_place.py.
+	bool ExportWorld(const std::string& Dir) const;
 	const Texture2D& Portrait(HeroId Id) const { return Portraits[static_cast<int>(Id)]; }
 	void Update(float Dt, const InputState& In);
 	void Render(ToonRenderer& R);

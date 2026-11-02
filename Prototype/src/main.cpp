@@ -97,8 +97,9 @@ namespace
 	struct Options
 	{
 		bool SmokeTest = false;
-	bool AnimTest = false;
+		bool AnimTest = false;
 		bool Fullscreen = false;
+		std::string ExportDir;   // --export-world: dump levels for the Roblox port
 		std::string ShotDir = "smoke-test-shots";
 		std::string DataDir;
 		int Width = 0, Height = 0;
@@ -427,6 +428,7 @@ int main(int Argc, char** Argv)
 		if (A == "--smoke-test") Opt.SmokeTest = true;
 		else if (A == "--anim-test") { Opt.SmokeTest = true; Opt.AnimTest = true; }
 		else if (A == "--fullscreen") Opt.Fullscreen = true;
+		else if (A == "--export-world" && i + 1 < Argc) { Opt.ExportDir = Argv[++i]; Opt.SmokeTest = true; }
 		else if (A == "--shots" && i + 1 < Argc) Opt.ShotDir = Argv[++i];
 		else if (A == "--data" && i + 1 < Argc) Opt.DataDir = Argv[++i];
 		else if (A == "--size" && i + 1 < Argc)
@@ -489,6 +491,13 @@ int main(int Argc, char** Argv)
 		Fatal("Failed to load game data: " + Error + "\nKeep the 'data' folder next to the game.");
 		CloseWindow();
 		return 1;
+	}
+	if (!Opt.ExportDir.empty())
+	{
+		const bool bOk = G.ExportWorld(Opt.ExportDir);
+		G.Shutdown();
+		CloseWindow();
+		return bOk ? 0 : 1;
 	}
 
 	ToonRenderer R;
