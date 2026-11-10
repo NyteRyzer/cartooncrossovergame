@@ -18,7 +18,7 @@ local function sitting()
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local seat = humanoid and humanoid.SeatPart
-	if seat and seat.Name == "DriverSeat" and seat.Parent and seat.Parent.Name == "HoverCar" then
+	if seat and seat.Name == "DriverSeat" and seat.Parent and seat.Parent.PrimaryPart and seat.Parent.PrimaryPart:FindFirstChild("DriveVelocity") then
 		return seat.Parent, humanoid
 	end
 	return nil

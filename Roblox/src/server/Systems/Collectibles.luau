@@ -13,7 +13,8 @@ local MapData = require(Shared:WaitForChild("MapData"))
 
 local Collectibles = {}
 local Net, PlayerState, Profiles, Progression
-local shards = {}  -- { Id, Pos, Level }
+local shards = {}
+local byId = {}  -- [id] = shard  -- { Id, Pos, Level }
 local taken = {}   -- [player] = { [id] = true }
 
 local function place(levelName, level, count, seed)
@@ -112,12 +113,20 @@ function Collectibles.start()
 	folder.Name = "Shards"
 	folder.Parent = workspace
 	local counts = { [Config.Levels.Nexus] = Config.Shards.Nexus, [Config.Levels.Retroville] = Config.Shards.Retroville }
+	-- Stable ids ("<level>_<n>", levels in sorted order) so saved shards survive server restarts.
+	local levelNames = {}
+	for name in pairs(MapData.Levels) do
+		table.insert(levelNames, name)
+	end
+	table.sort(levelNames)
 	local seed = 4242
-	for levelName, level in pairs(MapData.Levels) do
+	for _, levelName in ipairs(levelNames) do
 		seed = seed + 977
-		for _, pos in ipairs(place(levelName, level, counts[levelName] or 12, seed)) do
-			local id = #shards + 1
-			table.insert(shards, { Id = id, Pos = pos, Level = levelName })
+		for n, pos in ipairs(place(levelName, MapData.Levels[levelName], counts[levelName] or 12, seed)) do
+			local id = levelName .. "_" .. n
+			local s = { Id = id, Pos = pos, Level = levelName }
+			table.insert(shards, s)
+			byId[id] = s
 			buildShard(id, pos, folder)
 		end
 	end
@@ -135,9 +144,9 @@ function Collectibles.start()
 		local mine = taken[player] or {}
 		taken[player] = mine
 		for _, id in ipairs(data.Shards) do
-			if shards[id] then
+			if byId[id] then
 				mine[id] = true
-				Net.fire("Fx", player, { Kind = "ShardTaken", Id = id, Pos = shards[id].Pos, Silent = true })
+				Net.fire("Fx", player, { Kind = "ShardTaken", Id = id, Pos = byId[id].Pos, Silent = true })
 			end
 		end
 		syncCounts(player, mine)
@@ -164,7 +173,8 @@ function Collectibles.start()
 			local root = character and character:FindFirstChild("HumanoidRootPart")
 			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 			local mine = taken[player]
-			if root and humanoid and humanoid.Health > 0 and mine then
+			-- Only once the save has loaded, so every pickup is recorded and rewarded.
+			if root and humanoid and humanoid.Health > 0 and mine and Profiles.get(player) then
 				local reach = Config.Shards.Reach * math.max(1, root.Size.Y / 2)
 				for _, s in ipairs(shards) do
 					if not mine[s.Id] and (s.Pos - root.Position).Magnitude < reach then
@@ -173,7 +183,7 @@ function Collectibles.start()
 						humanoid.Health = math.min(humanoid.MaxHealth, humanoid.Health + Config.Shards.Health)
 						if st then
 							PlayerState.addMeter(st, Config.Shards.Meter)
-							st.Energy = Config.Player.MaxEnergy
+							st.Energy = st.MaxEnergy or Config.Player.MaxEnergy
 							st.Shards = st.Shards + 1
 						end
 						local have, total = 0, 0

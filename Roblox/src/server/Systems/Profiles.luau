@@ -17,7 +17,7 @@ local HttpService = game:GetService("HttpService")
 
 local Profiles = {}
 local STORE_NAME = "MultiverseToonsProfiles_v1"
-local VERSION = 1
+local VERSION = 2
 local AUTOSAVE = 60
 local LOCK_STALE = AUTOSAVE * 2.5
 
@@ -37,7 +37,11 @@ local function defaultProfile()
 end
 
 local MIGRATIONS = {
-	-- [1] = function(data) ... return data end,
+	-- v1 saved shards by placement index; v2 uses stable "<level>_<n>" ids.
+	[1] = function(data)
+		data.Shards = {}
+		return data
+	end,
 }
 
 local function migrate(data)
@@ -101,24 +105,46 @@ local function claim(player)
 	return result, reason
 end
 
-local function save(player, release)
-	local entry = profiles[player]
+local releasing = {} -- [userId] = true while a release save is in flight
+
+-- Saves one session's data. `release` also drops the lock (final save).
+local function save(entry, userKey, release)
 	if not entry or entry.NoSave or not store then
 		return true
 	end
-	local snapshot = HttpService:JSONDecode(HttpService:JSONEncode(entry.Data)) -- detach + validate JSON-safe
-	return withRetry(release and 5 or 3, function()
-		store:UpdateAsync(key(player), function(stored)
+	if entry.Released and not release then
+		return true -- the final save already ran; never re-lock after it
+	end
+	if release then
+		entry.Released = true
+	end
+	local ok, snapshot = pcall(function()
+		return HttpService:JSONDecode(HttpService:JSONEncode(entry.Data)) -- detach + validate JSON-safe
+	end)
+	if not ok then
+		warn("[Profiles] profile isn't JSON-safe: " .. tostring(snapshot))
+		return false
+	end
+	local lost = false
+	local saved = withRetry(release and 5 or 3, function()
+		lost = false
+		store:UpdateAsync(userKey, function(stored)
 			if stored and stored.lock and stored.lock.job ~= jobId then
-				return nil -- we lost the lock; never overwrite the new owner's data
+				lost = true
+				return nil -- another server owns it now; never overwrite their data
 			end
 			return { data = snapshot, lock = (not release) and { job = jobId, time = os.time() } or nil }
 		end)
 	end)
+	if lost then
+		entry.NoSave = true
+		warn("[Profiles] lost the session lock for " .. userKey .. "; further saves from this server are skipped")
+	end
+	return saved and not lost
 end
 
 local function setAttributes(player, data)
-	player:SetAttribute("Level", data.Level)
+	player:SetAttribute("PlayerLevel", data.Level) -- "Level" is the world the player is in
 	player:SetAttribute("Xp", data.Xp)
 	player:SetAttribute("Cash", data.Cash)
 	player:SetAttribute("SkillPoints", data.SkillPoints)
@@ -129,6 +155,12 @@ end
 
 local function onPlayerAdded(player)
 	local data, reason
+	-- A quick rejoin to this same server waits for its own release save first.
+	local waited = 0
+	while releasing[player.UserId] and waited < 20 do
+		task.wait(0.5)
+		waited = waited + 0.5
+	end
 	if store then
 		for _ = 1, 5 do
 			data, reason = claim(player)
@@ -139,6 +171,10 @@ local function onPlayerAdded(player)
 		end
 	end
 	if not player.Parent then
+		-- Left while loading: give the lock straight back.
+		if data then
+			save({ Data = data }, key(player), true)
+		end
 		return
 	end
 	local entry
@@ -163,8 +199,8 @@ local function onPlayerAdded(player)
 	-- Staggered autosave.
 	task.spawn(function()
 		task.wait((player.UserId % AUTOSAVE) + 5)
-		while profiles[player] == entry do
-			save(player, false)
+		while profiles[player] == entry and not entry.Released do
+			save(entry, key(player), false)
 			task.wait(AUTOSAVE)
 		end
 	end)
@@ -206,9 +242,12 @@ function Profiles.start()
 		task.spawn(onPlayerAdded, player)
 	end
 	Players.PlayerRemoving:Connect(function(player)
-		if profiles[player] then
-			save(player, true)
+		local entry = profiles[player]
+		if entry then
 			profiles[player] = nil
+			releasing[player.UserId] = true
+			save(entry, key(player), true)
+			releasing[player.UserId] = nil
 		end
 	end)
 	game:BindToClose(function()
@@ -216,10 +255,10 @@ function Profiles.start()
 			return
 		end
 		local pending = 0
-		for player in pairs(profiles) do
+		for player, entry in pairs(profiles) do
 			pending = pending + 1
 			task.spawn(function()
-				save(player, true)
+				save(entry, key(player), true)
 				pending = pending - 1
 			end)
 		end

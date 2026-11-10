@@ -33,7 +33,7 @@ local function spawnCar(road, index)
 	local pos = laneCenter + dir * along
 	local yaw = math.deg(math.atan2(-dir.X, -dir.Z))
 	local model = World.buildHoverCar(pos, yaw, COLORS[(index % #COLORS) + 1])
-	model.Name = "TrafficCar"
+	model:SetAttribute("Traffic", true)
 	local body = model.PrimaryPart
 	local car = {
 		Model = model, Body = body, Seat = model:FindFirstChild("DriverSeat"), Road = road, Sign = dirSign,
@@ -61,6 +61,9 @@ end
 
 local function drive(car, dt)
 	if car.Seat and car.Seat.Occupant then
+		if car.AI and car.Velocity then
+			car.Velocity.VectorVelocity = Vector3.zero -- hand it over at rest
+		end
 		car.AI = false -- hijacked: it's the driver's car now
 		return
 	end
@@ -80,12 +83,16 @@ local function drive(car, dt)
 	local toLane = laneCenter - pos
 	local lateral = toLane - dir * toLane:Dot(dir)
 	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { car.Model, workspace:FindFirstChild("Enemies") }
+	-- Only the map counts as ground (not people standing on the roof, not other cars).
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { workspace:FindFirstChild("Retroville") }
 	local hit = workspace:Raycast(pos + Vector3.new(0, 4, 0), Vector3.new(0, -60, 0), params)
-	local groundY = hit and hit.Position.Y or pos.Y - 4
+	local groundY = math.min(hit and hit.Position.Y or road.C.Y, road.C.Y + 2)
 	local vy = math.clamp((groundY + 4 - pos.Y) * 3, -30, 30)
 	local speed = blocked(car, dir) and 0 or SPEED
+	pcall(function()
+		car.Body:SetNetworkOwner(nil)
+	end)
 	car.Velocity.MaxForce = 2e5
 	car.Velocity.VectorVelocity = dir * speed + Vector3.new(lateral.X, 0, lateral.Z) * 2 + Vector3.new(0, vy, 0)
 	car.Orientation.CFrame = CFrame.lookAt(Vector3.zero, dir)

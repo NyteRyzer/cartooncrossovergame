@@ -45,6 +45,11 @@ end
 
 function HeatSystem.clear(player)
 	heat[player] = nil
+	for _, e in ipairs(Enemies.list()) do
+		if e.HuntFor == player and e.Model.Parent then
+			e.Model:Destroy()
+		end
+	end
 	player:SetAttribute("Heat", 0)
 	player:SetAttribute("HeatCooling", false)
 end
@@ -58,7 +63,16 @@ local function huntersNear(player, root)
 	return false
 end
 
+local MAX_HUNTERS = 8
+
 local function dispatch(player, root, count)
+	local alive = 0
+	for _, e in ipairs(Enemies.list()) do
+		if e.HuntFor == player and e.Health > 0 and e.Model.Parent then
+			alive = alive + 1
+		end
+	end
+	count = math.min(count, MAX_HUNTERS - alive)
 	for i = 1, count do
 		local a = (i / count) * math.pi * 2 + math.random() * 0.5
 		local pos = root.Position + Vector3.new(math.cos(a) * 75, 10, math.sin(a) * 75)

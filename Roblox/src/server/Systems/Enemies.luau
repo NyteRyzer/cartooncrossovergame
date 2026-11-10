@@ -105,9 +105,17 @@ local function makeModel(typeName, def, pos)
 end
 
 function Enemies.groundAt(pos)
+	-- Only the level maps count as ground (never players or enemies).
 	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { folder }
+	params.FilterType = Enum.RaycastFilterType.Include
+	local maps = {}
+	for name in pairs(MapData.Levels) do
+		local f = workspace:FindFirstChild(name)
+		if f then
+			table.insert(maps, f)
+		end
+	end
+	params.FilterDescendantsInstances = maps
 	local hit = workspace:Raycast(pos + Vector3.new(0, 30, 0), Vector3.new(0, -120, 0), params)
 	return hit and hit.Position or pos
 end
@@ -162,7 +170,7 @@ local function kill(e, attacker)
 		PlayerState.addMeter(st, 5)
 		st.Kills = st.Kills + 1
 		attacker:SetAttribute("Kills", st.Kills)
-		if Progression then
+		if Progression and not e.IsBoss then -- the boss pays everyone itself
 			Progression.award(attacker, e.Def.Xp or 10, e.Def.Cash or 5, e.Type)
 		end
 		if HeatSystem and e.Def.Heat then
@@ -215,6 +223,7 @@ function Enemies.damage(e, amount, knock, attacker, opts)
 		e.StateUntil = e.Staggered
 		e.Model:SetAttribute("Windup", nil)
 		e.Model:SetAttribute("Staggered", true)
+		e.Pending = nil -- a broken posture cancels a pending boss attack
 		Net.fireAll("Fx", { Kind = "Stagger", Pos = e.Root.Position, Model = e.Model })
 	end
 	Net.fireAll("Fx", { Kind = "Hit", Pos = e.Root.Position, Color = Color3.new(1, 1, 1), Model = e.Model, Attacker = attacker })
@@ -235,7 +244,9 @@ end
 function Enemies.counter(player, pos)
 	local countered = 0
 	for _, e in ipairs(list) do
-		if e.Health > 0 and e.Model.Parent and e.State == "Windup" and (e.Target == player or (e.Root.Position - pos).Magnitude < Config.Combat.CounterRange) then
+		-- Only the last part of a wind-up can be countered: it takes timing, not mashing.
+		local inWindow = e.State == "Windup" and os.clock() >= e.StateUntil - Config.Combat.CounterWindow
+		if e.Health > 0 and e.Model.Parent and inWindow and (e.Target == player or (e.Root.Position - pos).Magnitude < Config.Combat.CounterRange) then
 			if (e.Root.Position - pos).Magnitude < Config.Combat.CounterRange + e.Radius then
 				e.State = "Recover"
 				e.StateUntil = os.clock() + 1.0
@@ -366,6 +377,13 @@ local function think(e, now, step)
 	end
 	e.State = "Chase"
 	local player, dist
+	if e.HuntFor then
+		-- Hunters give up on targets who left Retroville (the heat system dismisses them too).
+		local hst = PlayerState.get(e.HuntFor)
+		if not hst or hst.Level ~= Config.Levels.Retroville then
+			e.HuntFor = nil
+		end
+	end
 	if e.HuntFor and rootOf(e.HuntFor) then
 		player = e.HuntFor
 		dist = (rootOf(player).Position - pos).Magnitude

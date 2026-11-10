@@ -13,7 +13,7 @@ local Omnitrix = require(Shared:WaitForChild("Omnitrix"))
 local Looks = require(script.Parent.Parent:WaitForChild("Lib"):WaitForChild("Looks"))
 
 local Heroes = {}
-local Net, PlayerState, World
+local Net, PlayerState, World, Progression
 
 -- Movement state keys the client may report, with their type and limits.
 local STATE_KEYS = {
@@ -93,6 +93,10 @@ local function onCharacter(player, character)
 		st.Omni = Omnitrix.new(Config.Omnitrix)
 	end
 	Heroes.refreshLook(player)
+	-- Skill bonuses (max health) after the base stats are set.
+	if Progression then
+		Progression.applyToCharacter(player)
+	end
 end
 
 local function onState(player, state)
@@ -178,7 +182,7 @@ local function onOmnitrix(player, action, slot)
 end
 
 function Heroes.init(systems)
-	Net, PlayerState, World = systems.Net, systems.Players, systems.World
+	Net, PlayerState, World, Progression = systems.Net, systems.Players, systems.World, systems.Progression
 	Net.on("State", 20, onState)
 	Net.on("Omnitrix", 8, onOmnitrix)
 	Net.on("SelectHero", 2, function(player, heroId)
@@ -236,8 +240,8 @@ function Heroes.start()
 					st.Intangible = false
 					character:SetAttribute("MvIntangible", false)
 				end
-			elseif st.Energy < Config.Player.MaxEnergy then
-				st.Energy = math.min(Config.Player.MaxEnergy, st.Energy + Config.Player.EnergyRegen * dt)
+			elseif st.Energy < (st.MaxEnergy or Config.Player.MaxEnergy) then
+				st.Energy = math.min(st.MaxEnergy or Config.Player.MaxEnergy, st.Energy + Config.Player.EnergyRegen * dt)
 			end
 		end
 	end)

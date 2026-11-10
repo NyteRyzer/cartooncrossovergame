@@ -261,7 +261,7 @@ end
 
 -- Cash, level, XP, wanted stars, boss bar, mission timer.
 local function refreshExtras()
-	local level = player:GetAttribute("Level") or 1
+	local level = player:GetAttribute("PlayerLevel") or 1
 	local xp = player:GetAttribute("Xp") or 0
 	local need = Rules.xpToNext(level, Config)
 	stats.Level.Text = ("LV %d"):format(level)
@@ -498,14 +498,8 @@ function Hud.init(controllers)
 	build()
 	buildExtras()
 	Input.on("Skills", function(down)
-		if down then
-			if skillsMenu.Visible then
-				skillsMenu.Visible = false
-				Input.setEnabled(true)
-				CameraRig.setCursorFree(false)
-			else
-				openSkills()
-			end
+		if down and not skillsMenu.Visible then
+			openSkills()
 		end
 	end)
 	Input.on("Help", function(down)
@@ -547,6 +541,14 @@ function Hud.start()
 		end
 	end)
 	UserInputService.InputBegan:Connect(function(input)
+		-- Skills / shop menus close with K or Esc (gameplay input is off while they're open).
+		if (skillsMenu.Visible or shopMenu.Visible) and (input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.K) then
+			skillsMenu.Visible = false
+			shopMenu.Visible = false
+			Input.setEnabled(true)
+			CameraRig.setCursorFree(false)
+			return
+		end
 		if not menu.Visible then
 			return
 		end

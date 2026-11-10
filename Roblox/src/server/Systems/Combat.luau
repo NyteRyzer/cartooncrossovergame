@@ -121,7 +121,7 @@ local function onCounter(player)
 	if not st or not character or not canAttack(st, character) then
 		return
 	end
-	if not PlayerState.ready(st, "Counter", Config.Combat.CounterCooldown) then
+	if os.clock() < (st.CounterLockUntil or 0) or not PlayerState.ready(st, "Counter", Config.Combat.CounterCooldown) then
 		return
 	end
 	local countered = Enemies.counter(player, root.Position)
@@ -131,6 +131,7 @@ local function onCounter(player)
 		Net.fireAll("Fx", { Kind = "Counter", Player = player, Pos = root.Position, Count = countered })
 	else
 		st.BlockUntil = os.clock() + Config.Combat.BlockTime
+		st.CounterLockUntil = os.clock() + Config.Combat.WhiffLockout
 		character:SetAttribute("BlockAt", workspace:GetServerTimeNow())
 	end
 end

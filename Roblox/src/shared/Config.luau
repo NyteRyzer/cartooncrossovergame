@@ -182,9 +182,11 @@ Config.Levels = { Nexus = "NexusObservatory", Retroville = "Retroville" }
 -- ---------------------------------------------------------------------------
 Config.Combat = {
 	CounterRange = 16,      -- enemies winding up this close can be countered
+	CounterWindow = 0.45,   -- ...during the last this-many seconds of their wind-up
+	WhiffLockout = 0.9,     -- a counter with nothing to counter locks you out this long
 	CounterDamage = 15,
 	CounterImmunity = 0.45,
-	BlockTime = 0.5,        -- a counter with nothing to counter becomes a block
+	BlockTime = 0.4,        -- a counter with nothing to counter becomes a short block
 	BlockReduce = 0.7,      -- damage taken while blocking is reduced by this much
 	CounterCooldown = 0.45,
 	ComboTimeout = 2.5,     -- seconds without landing a hit before the combo drops

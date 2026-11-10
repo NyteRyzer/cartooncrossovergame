@@ -67,17 +67,26 @@ function Courses.start()
 						run.Next = run.Next + 1
 						if run.Next > #course.Gates then
 							local time = now - run.Start
+							-- Faster than anything in the game can fly the course = not a real run.
+							local minTime = 0
+							for gi = 2, #course.Gates do
+								minTime = minTime + (course.Gates[gi].Pos - course.Gates[gi - 1].Pos).Magnitude / 160
+							end
+							local legit = time >= minTime and now >= (run.RewardAt or 0)
 							local data = Profiles.get(player)
 							local saved = data and data.Best[course.Name]
 							run.Best = run.Best or saved
 							local best = not run.Best or time < run.Best
-							if best then
+							if best and legit then
 								run.Best = time
 								if data then
 									data.Best[course.Name] = math.floor(time * 100) / 100
 								end
 							end
-							Progression.award(player, best and 100 or 50, best and 60 or 25, course.Name)
+							if legit then
+								run.RewardAt = now + 20
+								Progression.award(player, best and 100 or 50, best and 60 or 25, course.Name)
+							end
 							Net.fire("Notify", player, { Banner = ("%s: %.2fs%s"):format(course.Name, time, best and "  NEW BEST!" or ""), Color = Color3.fromRGB(140, 255, 200) })
 							run.Next = 1
 						end

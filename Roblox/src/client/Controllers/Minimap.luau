@@ -181,7 +181,12 @@ local function update()
 	local enemies = workspace:FindFirstChild("Enemies")
 	if enemies then
 		for _, m in ipairs(enemies:GetChildren()) do
-			if m:IsA("Model") and m.PrimaryPart then
+			if m:IsA("Model") and m.Name == "Rift" then
+				local core = m:FindFirstChild("Core")
+				if core then
+					add(core.Position, Color3.fromRGB(190, 90, 255), 12, true, true)
+				end
+			elseif m:IsA("Model") and m.PrimaryPart then
 				if m:GetAttribute("Enemy") == "Boss" then
 					add(m.PrimaryPart.Position, Color3.fromRGB(255, 60, 200), 16, true, true)
 				elseif m:GetAttribute("Enemy") then

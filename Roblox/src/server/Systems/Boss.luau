@@ -150,6 +150,7 @@ local function charge(e, target)
 	dir = dir.Unit
 	local hit = {}
 	e.Align.MaxVelocity = 70
+	e.ChargeUntil = os.clock() + 1.4
 	local goal = e.Root.Position + dir * 90
 	e.Align.Position = goal
 	task.spawn(function()
@@ -227,7 +228,7 @@ local function think(e, now, step)
 		end
 		return
 	end
-	if not target then
+	if not target or now < (e.ChargeUntil or 0) then
 		return
 	end
 	local tr = rootOf(target)

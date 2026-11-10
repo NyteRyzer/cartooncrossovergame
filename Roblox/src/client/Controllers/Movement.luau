@@ -1231,6 +1231,9 @@ function Movement.start()
 	remotes = ReplicatedStorage:WaitForChild("Remotes")
 	game:GetService("UserInputService").JumpRequest:Connect(onJumpRequest)
 	player.CharacterAdded:Connect(function()
+		if S.Swing and S.Swing.Anchor then
+			S.Swing.Anchor:Destroy()
+		end
 		reset()
 		mover = nil
 		lastSent = {}

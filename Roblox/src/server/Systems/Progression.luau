@@ -33,6 +33,7 @@ function Progression.applyToCharacter(player)
 	if st then
 		st.DamageMul = fx.Damage
 		st.MeterMul = fx.Meter
+		st.MaxEnergy = Config.Player.MaxEnergy + fx.Energy
 	end
 	local max = Config.Player.MaxHealth + fx.MaxHealth
 	local frac = humanoid.Health / math.max(1, humanoid.MaxHealth)
@@ -187,16 +188,7 @@ function Progression.start()
 	Profiles.onLoaded(function(player)
 		Progression.applyToCharacter(player)
 	end)
-	local function hook(player)
-		player.CharacterAdded:Connect(function()
-			task.wait(0.5)
-			Progression.applyToCharacter(player)
-		end)
-	end
-	Players.PlayerAdded:Connect(hook)
-	for _, player in ipairs(Players:GetPlayers()) do
-		hook(player)
-	end
+	-- (Heroes applies the bonus at the end of its own character setup.)
 end
 
 return Progression
