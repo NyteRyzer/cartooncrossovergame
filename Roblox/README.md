@@ -62,6 +62,67 @@ see and edit them in Studio), along with every script.
 - **Mobile and gamepad:** on-screen buttons and touch-drag camera on mobile; gamepad mappings
   for every action.
 
+## Open-world action mechanics
+
+These borrow the best-known ideas from the last decade's superhero, action and open-world games.
+The code is original.
+
+**Freeflow combat**
+- When an enemy winds up to hit you, a red **!** appears over it and a COUNTER prompt flashes.
+  Counter in time (right click / X) to reverse the attack. Pressing counter with no attack
+  coming blocks instead.
+- Melee attacks lunge across the gap to the targeted enemy. Lock on with **Z** to keep the
+  camera on one enemy.
+- Hits build up an enemy's posture. A full posture bar staggers it ("FINISH IT!"), and the
+  next melee hit is a finisher that heals you.
+- Shots fired at you can be countered back at the shooter.
+- An 8-hit combo unlocks a special **takedown** (T). Taking a hit breaks your combo.
+
+**Enemies**
+- **Gremlin**: basic melee.
+- **Brute**: heavy, with a ground-slam shockwave.
+- **Spitter**: ranged; its shots can be parried.
+- **Hunter**: sent by the wanted level.
+- Rift waves mix these types.
+
+**Boss: the Rift Titan** has three phases:
+1. A ground shockwave you jump over, and a charge you dodge.
+2. Adds projectile volleys you can counter back.
+3. Enraged: faster, and summons gremlins.
+
+It appears when all three rifts are closed, or from the Titan Hunt mission. It can be
+posture-broken for big finisher damage.
+
+**Parkour**
+- **Wall-run:** hold Shift alongside a wall in the air, and jump to kick off it.
+- **Wall-climb:** hold Shift running into a wall. It costs energy, and you vault over the top.
+- **Mantle:** automatic onto ledges.
+- **Slide:** Ctrl while sprinting.
+- **Rope swing:** El Tigre swings from anything above him (Q in the air). Pump the swing and let go to fling.
+
+**Open world**
+- **Wanted level:** smashing monsters in Retroville raises threat stars, and Hunter squads chase
+  you. Lie low (no fighting, no hunters near) and the stars flash and cool off.
+- **Missions:** walk into a yellow marker and press E. Each has a waypoint, a timer and rewards:
+  - **Rift Rush:** three combat waves Downtown.
+  - **Express Delivery:** drive a hover car to the Neutron house against the clock.
+  - **Rooftop Run:** reach tower-top checkpoints.
+  - **Titan Hunt:** the boss fight.
+- **Traffic:** hover cars drive Retroville's streets and stop for people in the road. Press E
+  to hijack one.
+- **Day/night cycle:** a full day every 12 minutes.
+- **Minimap:** rotates with the camera and shows roads, missions, rifts, shards, enemies, players,
+  cars, the boss, and an arrow to your objective.
+
+**Progression (saved between sessions)**
+- XP and cash from kills, rifts, missions, courses and shards.
+- Level-ups give skill points. Spend them with **K** or at the Upgrade Bench in the Nexus on
+  Vitality, Power, Reserves, Aerodynamics, Agility or Focus.
+- The Gear Locker in the Nexus sells health packs, ultimate charge and extra skill points.
+- Saving uses Roblox DataStores, with a session lock so data can't be duplicated or lost when
+  switching servers. Enable **Game Settings > Security > Enable Studio Access to API Services**
+  to test saving in Studio. Without it, progress just doesn't save.
+
 ## Controls
 
 | Action | Keyboard / mouse |
@@ -80,6 +141,13 @@ see and edit them in Studio), along with every script.
 | Ben's Omnitrix | 1 / 2 / 3 transform, Q dial, G Master Control Glitch, F Way Big |
 | Terminals, hover car | E |
 | Back to the Nexus | P |
+| Counter / block | Right click or X (on a red **!** to counter) |
+| Takedown | T (with an 8+ combo) |
+| Lock-on | Z or middle mouse |
+| Wall-run / wall-climb | Hold Shift alongside / into a wall |
+| Slide | Ctrl while sprinting |
+| Skills menu | K |
+| Missions, shop, skills bench | E at the marker or service |
 | Controls overlay | F1 |
 
 ## Project layout
