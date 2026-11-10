@@ -300264,11 +300264,132 @@ Config.Shards = { Retroville = 24, Nexus = 10, Reach = 6, Health = 15, Meter = 1
 -- Names of the map folders built into Workspace by Roblox/tools/build_place.py.
 Config.Levels = { Nexus = "NexusObservatory", Retroville = "Retroville" }
 
+-- ---------------------------------------------------------------------------
+-- Combat 2.0: freeflow counters, posture/stagger and finishers, takedowns,
+-- lock-on and lunges (in the spirit of the Arkham, Spider-Man, Sekiro and
+-- Doom-style finisher games), enemy types and the Rift Titan boss.
+-- ---------------------------------------------------------------------------
+Config.Combat = {
+	CounterRange = 16,      -- enemies winding up this close can be countered
+	CounterDamage = 15,
+	CounterImmunity = 0.45,
+	BlockTime = 0.5,        -- a counter with nothing to counter becomes a block
+	BlockReduce = 0.7,      -- damage taken while blocking is reduced by this much
+	CounterCooldown = 0.45,
+	ComboTimeout = 2.5,     -- seconds without landing a hit before the combo drops
+	TakedownCombo = 8,      -- combo needed for a special takedown
+	TakedownRange = 26,
+	StaggerTime = 2.5,      -- posture broken: open to a finisher
+	FinisherHeal = 20,
+	PostureDecay = 12,      -- per second, after 2 s without being hit
+	LockRange = 75,
+	LungeRange = 30,
+	LungeSpeed = 75,
+}
+
+Config.EnemyTypes = {
+	Gremlin = { Health = 40, Speed = 14, Damage = 8, Posture = 60, Windup = 0.6, Reach = 6, Size = 3.2,
+		Color = rgb(170, 80, 230), Xp = 10, Cash = 5, Heat = 0.12 },
+	Brute = { Health = 170, Speed = 9, Damage = 18, Posture = 150, Windup = 0.95, Reach = 10, Size = 6.5,
+		Color = rgb(150, 40, 60), Xp = 35, Cash = 20, Heat = 0.35, Slam = 13 },
+	Spitter = { Health = 30, Speed = 12, Damage = 10, Posture = 40, Windup = 0.8, Reach = 70, Size = 2.6,
+		Color = rgb(90, 200, 90), Xp = 15, Cash = 8, Heat = 0.15, Ranged = true, KeepAway = 35 },
+	Hunter = { Health = 70, Speed = 22, Damage = 10, Posture = 80, Windup = 0.5, Reach = 6, Size = 3.4,
+		Color = rgb(70, 110, 170), Xp = 20, Cash = 12, Heat = 0.04 },
+}
+
+Config.Boss = {
+	Name = "Rift Titan", Health = 3000, PerExtraPlayer = 0.5, Size = 22, Speed = 10, Posture = 700,
+	StompDamage = 22, StompRadius = 70, ChargeDamage = 25, SpitDamage = 14, Xp = 600, Cash = 400,
+	Color = rgb(110, 40, 160),
+}
+
+-- ---------------------------------------------------------------------------
+-- Progression (levels, skills, cash), wanted level, missions, the shop.
+-- ---------------------------------------------------------------------------
+Config.Progression = { XpBase = 100, XpGrowth = 1.22, MaxLevel = 50, SkillPrice = 250, SkillPriceGrowth = 1.5 }
+
+Config.SkillOrder = { "Vitality", "Power", "Reserves", "Aero", "Agility", "Focus" }
+Config.Skills = {
+	Vitality = { Max = 5, Name = "Vitality", Desc = "+12 max health per rank" },
+	Power = { Max = 5, Name = "Power", Desc = "+8% damage per rank" },
+	Reserves = { Max = 5, Name = "Reserves", Desc = "+15 max energy per rank" },
+	Aero = { Max = 5, Name = "Aerodynamics", Desc = "+8% flight and glide speed per rank" },
+	Agility = { Max = 5, Name = "Agility", Desc = "+6% run speed per rank" },
+	Focus = { Max = 5, Name = "Focus", Desc = "+12% ultimate charge per rank" },
+}
+
+Config.Shop = {
+	{ Id = "Medkit", Name = "Health Pack", Desc = "Heal 60 health now", Price = 30 },
+	{ Id = "Charge", Name = "Ultimate Charge", Desc = "+50 ultimate meter", Price = 70 },
+	{ Id = "SkillPoint", Name = "Skill Point", Desc = "One extra skill point (price rises)", Price = 250 },
+}
+
+-- Wanted level ("threat"): chaos raises it, hunter squads come after you,
+-- break line of sight and lie low to shake them.
+Config.Heat = {
+	Max = 5, DecayDelay = 10, DecayPerSecond = 0.12, NearRange = 110,
+	SquadInterval = { 30, 22, 17, 13, 10 }, SquadSize = { 2, 3, 4, 5, 6 },
+}
+
+Config.DayLengthSeconds = 720
+
 return Config
 ]]></ProtectedString>
 </Properties>
 </Item>
 <Item class="ModuleScript" referent="RBX18812"><Properties>
+<string name="Name">Heat</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Wanted level ("threat stars"), as a pure state machine. Chaos raises heat;
+-- while you have stars, hunter squads are sent after you; stay out of combat
+-- and away from hunters for a while and the stars cool off one by one.
+
+local Heat = {}
+Heat.__index = Heat
+
+function Heat.new(config)
+	return setmetatable({ Config = config.Heat, Value = 0, LastChaos = -1e9, SquadTimer = 0 }, Heat)
+end
+
+function Heat:Stars()
+	return math.floor(self.Value)
+end
+
+function Heat:AddChaos(amount, now)
+	self.Value = math.min(self.Config.Max + 0.99, self.Value + amount)
+	self.LastChaos = now
+end
+
+-- Cooling down: no recent chaos and no hunters near.
+function Heat:Cooling(now, huntersNear)
+	return self.Value > 0 and not huntersNear and now - self.LastChaos >= self.Config.DecayDelay
+end
+
+-- Advances the timers. Returns the number of hunters to spawn this tick (0 most of the time).
+function Heat:Tick(dt, now, huntersNear)
+	if self:Cooling(now, huntersNear) then
+		self.Value = math.max(0, self.Value - self.Config.DecayPerSecond * dt)
+	end
+	local stars = self:Stars()
+	if stars <= 0 then
+		self.SquadTimer = 0
+		return 0
+	end
+	self.SquadTimer = self.SquadTimer + dt
+	local interval = self.Config.SquadInterval[math.min(stars, #self.Config.SquadInterval)]
+	if self.SquadTimer >= interval then
+		self.SquadTimer = 0
+		return self.Config.SquadSize[math.min(stars, #self.Config.SquadSize)]
+	end
+	return 0
+end
+
+return Heat
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18813"><Properties>
 <string name="Name">MapData</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- GENERATED by Roblox/tools/build_place.py from Roblox/world/*.world. Do not edit.
@@ -300317,11 +300438,80 @@ return {
 		Course = { Name = "Hover Race", Gates = { "RaceGate_S_0_0", "RaceGate_S_1_0", "RaceGate_S_2_0", "RaceGate_S_3_0", "RaceGate_S_4_0", "RaceGate_S_5_0", "RaceGate_S_6_0", "RaceGate_S_7_0", "RaceGate_E_0_0", "RaceGate_E_0_1", "RaceGate_E_0_2", "RaceGate_E_0_3", "RaceGate_E_0_4", "RaceGate_E_0_5", "RaceGate_E_0_6", "RaceGate_E_0_7", "RaceGate_N_7_0", "RaceGate_N_6_0", "RaceGate_N_5_0", "RaceGate_N_4_0", "RaceGate_N_3_0", "RaceGate_N_2_0", "RaceGate_N_1_0", "RaceGate_N_0_0", "RaceGate_W_0_7", "RaceGate_W_0_6", "RaceGate_W_0_5", "RaceGate_W_0_4", "RaceGate_W_0_3", "RaceGate_W_0_2", "RaceGate_W_0_1", "RaceGate_W_0_0" } },
 	},
 	},
+	Services = {
+		GearLocker = Vector3.new(-61.60, 0.00, -25.50),
+		UpgradeBench = Vector3.new(-25.50, 0.00, 61.60),
+		MissionBoard = Vector3.new(61.60, 0.00, 25.50),
+	},
+	Anchors = {
+		Downtown = Vector3.new(783.33, 0.00, 8316.67),
+		School = Vector3.new(400.00, 0.00, 7683.33),
+		Plaza = Vector3.new(1200.00, 0.00, 6666.67),
+		NeutronHouse = Vector3.new(-1166.67, 0.00, 6886.67),
+		TowerBase = Vector3.new(972.39, 0.00, 8200.00),
+		Towers = { Vector3.new(900.00, 77.12, 8200.00), Vector3.new(1133.33, 111.48, 8666.67), Vector3.new(200.00, 76.67, 8666.67), Vector3.new(200.00, 90.86, 8900.00), Vector3.new(200.00, 99.68, 9133.33) },
+	},
+	Roads = {
+		{ C = Vector3.new(0.00, 0.03, 8000.00), L = 3333.3, W = 53.3, Axis = "Z" },
+		{ C = Vector3.new(0.00, 0.03, 8000.00), L = 3333.3, W = 53.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 6375.00), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 6558.33), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 6741.67), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 6925.00), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 7108.33), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 7291.67), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 7475.00), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 7658.33), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 7841.67), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-1441.67, 0.09, 7108.33), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-1258.33, 0.09, 7108.33), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-1075.00, 0.09, 7108.33), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-891.67, 0.09, 7108.33), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-708.33, 0.09, 7108.33), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-525.00, 0.09, 7108.33), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-341.67, 0.09, 7108.33), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-158.33, 0.09, 7108.33), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-1625.00, 0.09, 7108.33), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-891.67, 0.07, 8158.33), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 8341.67), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 8525.00), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 8708.33), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 8891.67), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 9075.00), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 9258.33), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 9441.67), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-891.67, 0.07, 9625.00), L = 1466.7, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(-1441.67, 0.09, 8891.67), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-1258.33, 0.09, 8891.67), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-1075.00, 0.09, 8891.67), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-891.67, 0.09, 8891.67), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-708.33, 0.09, 8891.67), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-525.00, 0.09, 8891.67), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-341.67, 0.09, 8891.67), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-158.33, 0.09, 8891.67), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(-1625.00, 0.09, 8891.67), L = 1466.7, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(783.33, 0.07, 8083.33), L = 1400.0, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(783.33, 0.07, 8316.67), L = 1400.0, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(783.33, 0.07, 8550.00), L = 1400.0, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(783.33, 0.07, 8783.33), L = 1400.0, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(783.33, 0.07, 9016.67), L = 1400.0, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(783.33, 0.07, 9250.00), L = 1400.0, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(783.33, 0.07, 9483.33), L = 1400.0, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(316.67, 0.09, 8783.33), L = 1400.0, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(550.00, 0.09, 8783.33), L = 1400.0, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(783.33, 0.09, 8783.33), L = 1400.0, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(1016.67, 0.09, 8783.33), L = 1400.0, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(1250.00, 0.09, 8783.33), L = 1400.0, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(1483.33, 0.09, 8783.33), L = 1400.0, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(83.33, 0.09, 8783.33), L = 1400.0, W = 33.3, Axis = "Z" },
+		{ C = Vector3.new(0.00, 0.03, 8000.00), L = 3333.3, W = 33.3, Axis = "X" },
+		{ C = Vector3.new(0.00, 0.05, 8000.00), L = 3333.3, W = 33.3, Axis = "Z" },
+	},
 }
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18813"><Properties>
+<Item class="ModuleScript" referent="RBX18814"><Properties>
 <string name="Name">Omnitrix</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Ben's Omnitrix as a pure state machine: a line-for-line port of
@@ -300572,7 +300762,7 @@ return Omnitrix
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18814"><Properties>
+<Item class="ModuleScript" referent="RBX18815"><Properties>
 <string name="Name">Pose</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Procedural character animation, ported from the prototype
@@ -300994,6 +301184,69 @@ function Pose.Compute(st)
 		end
 	end
 
+	-- Parkour and combat moves (newer open-world action-game staples).
+	local tm = t
+	if st.Slide then
+		-- Feet-first slide.
+		O.Lean = -28
+		leg(1, 85, 10, 1)
+		leg(2, 35, 95, 1)
+		arm(1, -35, 35, 20, 1)
+		arm(2, 20, 30, 40, 1)
+		O.Bob = O.Bob - 22
+		O.HeadPitch = 10
+	end
+	if st.WallRun then
+		-- Running along a wall: fast cycle, body tilted away from it.
+		local p2 = tm * 14
+		O.Thigh[1] = 45 * sin(p2)
+		O.Thigh[2] = -45 * sin(p2)
+		O.Knee[1] = 20 + 60 * max(0, cos(p2))
+		O.Knee[2] = 20 + 60 * max(0, -cos(p2))
+		O.ShFwd[1] = -40 * sin(p2)
+		O.ShFwd[2] = 40 * sin(p2)
+		O.Lean = 12
+		O.BodyRoll = -(st.WallSide or 1) * 28
+	end
+	if st.Climb then
+		-- Scrambling straight up a wall, hand over hand.
+		local p3 = tm * 10
+		arm(1, 150 + sin(p3) * 25, 20, 40 + sin(p3) * 30, 1)
+		arm(2, 150 - sin(p3) * 25, 20, 40 - sin(p3) * 30, 1)
+		leg(1, 55 + sin(p3) * 25, 70, 1)
+		leg(2, 55 - sin(p3) * 25, 70, 1)
+		O.Lean = -8
+		O.HeadPitch = -20
+	end
+	if st.Swing then
+		-- Swinging on a line: lead arm up holding it, legs swing with the arc.
+		arm(2, 175, 5, 10, 1)
+		arm(1, 30, 40, 40, 1)
+		local swingK = clamp((st.VelY or 0) / 40, -1, 1)
+		leg(1, 30 - swingK * 30, 40, 1)
+		leg(2, 10 - swingK * 30, 25, 1)
+		O.Lean = -swingK * 15
+	end
+	if (st.Counter or 0) > 0 then
+		-- Counter strike: quick backhand and lean in.
+		local c = st.Counter / 0.3
+		arm(2, 100, -40 + 80 * (1 - c), 10, 1)
+		O.ChestTwist = O.ChestTwist + 35 * c
+		O.Lean = O.Lean + 12
+	elseif (st.Block or 0) > 0 then
+		arm(1, 95, -35, 110, 1)
+		arm(2, 95, -35, 110, 1)
+		O.Lean = O.Lean - 5
+	end
+	if (st.Takedown or 0) > 0 then
+		-- Special takedown: leap and a two-handed hammer blow.
+		local k = 1 - st.Takedown / 0.6
+		arm(1, 170 - 140 * k, 10, 20, 1)
+		arm(2, 170 - 140 * k, 10, 20, 1)
+		O.BodyPitch = O.BodyPitch + 30 * sin(PI * k)
+		O.Bob = O.Bob + 15 * sin(PI * k)
+	end
+
 	-- Flight.
 	if flying then
 		local fwd = clamp(speed3 / 50, 0, 1)
@@ -301283,7 +301536,75 @@ return Pose
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18815"><Properties>
+<Item class="ModuleScript" referent="RBX18816"><Properties>
+<string name="Name">Progression</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Pure progression rules shared by server (authoritative) and client (UI):
+-- XP curve and level-ups, skill effects, shop prices. Tested by
+-- Roblox/tools/test_logic.py.
+
+local Progression = {}
+
+function Progression.xpToNext(level, config)
+	local p = config.Progression
+	return math.floor(p.XpBase * p.XpGrowth ^ (level - 1))
+end
+
+-- Adds XP to a profile table ({ Level, Xp, SkillPoints }); returns levels gained.
+function Progression.addXp(profile, amount, config)
+	local gained = 0
+	profile.Xp = profile.Xp + math.max(0, math.floor(amount))
+	while profile.Level < config.Progression.MaxLevel and profile.Xp >= Progression.xpToNext(profile.Level, config) do
+		profile.Xp = profile.Xp - Progression.xpToNext(profile.Level, config)
+		profile.Level = profile.Level + 1
+		profile.SkillPoints = profile.SkillPoints + 1
+		gained = gained + 1
+	end
+	if profile.Level >= config.Progression.MaxLevel then
+		profile.Xp = 0
+	end
+	return gained
+end
+
+-- Spends a point on a skill. Returns true on success.
+function Progression.buySkill(profile, skill, config)
+	local def = config.Skills[skill]
+	if not def or profile.SkillPoints < 1 then
+		return false
+	end
+	local rank = profile.Skills[skill] or 0
+	if rank >= def.Max then
+		return false
+	end
+	profile.Skills[skill] = rank + 1
+	profile.SkillPoints = profile.SkillPoints - 1
+	return true
+end
+
+-- Multipliers and bonuses from skill ranks.
+function Progression.effects(skills)
+	local function r(name)
+		return (skills and skills[name]) or 0
+	end
+	return {
+		MaxHealth = 12 * r("Vitality"),
+		Damage = 1 + 0.08 * r("Power"),
+		Energy = 15 * r("Reserves"),
+		Flight = 1 + 0.08 * r("Aero"),
+		Walk = 1 + 0.06 * r("Agility"),
+		Meter = 1 + 0.12 * r("Focus"),
+	}
+end
+
+function Progression.skillPointPrice(bought, config)
+	return math.floor(config.Progression.SkillPrice * config.Progression.SkillPriceGrowth ^ bought)
+end
+
+return Progression
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18817"><Properties>
 <string name="Name">Remotes</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Every remote in the game, created by the server (Systems/Net) at startup.
@@ -301300,6 +301621,12 @@ return {
 		"Fx",           -- server -> clients: visual effects
 		"Notify",       -- server -> client: messages, banners
 		"OpenTerminal", -- server -> client: show the hero/travel menu
+		"Counter",      -- client: counter / parry (or block)
+		"Takedown",     -- client: special takedown (needs a high combo)
+		"Skill",        -- client: spend a skill point
+		"Shop",         -- client: buy an item at the Gear Locker
+		"OpenShop",     -- server -> client: show the shop
+		"Objective",    -- server -> client: mission objective / waypoint
 	},
 	Functions = {},
 }
@@ -301308,17 +301635,20 @@ return {
 </Item>
 </Item>
 </Item>
-<Item class="ServerScriptService" referent="RBX18816"><Properties>
+<Item class="ServerScriptService" referent="RBX18818"><Properties>
 <string name="Name">ServerScriptService</string>
 </Properties>
-<Item class="Script" referent="RBX18817"><Properties>
+<Item class="Script" referent="RBX18819"><Properties>
 <string name="Name">Server</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Server entry point: requires every system, then runs init (wiring, remotes)
 -- for all of them before any start (loops, connections that need others).
 
 local systems = {}
-local order = { "Net", "Players", "Heroes", "World", "Enemies", "Combat", "Collectibles", "Courses" }
+local order = {
+	"Net", "Players", "Profiles", "Heroes", "World", "Progression", "Heat", "Enemies", "Combat", "Boss",
+	"Collectibles", "Courses", "Missions", "Traffic",
+}
 for _, name in ipairs(order) do
 	local module = script:WaitForChild("Systems"):FindFirstChild(name)
 	if module then
@@ -301343,10 +301673,10 @@ print("[MultiverseToons] server ready")
 ]]></ProtectedString>
 <token name="RunContext">0</token>
 </Properties>
-<Item class="Folder" referent="RBX18818"><Properties>
+<Item class="Folder" referent="RBX18820"><Properties>
 <string name="Name">Lib</string>
 </Properties>
-<Item class="ModuleScript" referent="RBX18819"><Properties>
+<Item class="ModuleScript" referent="RBX18821"><Properties>
 <string name="Name">Looks</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Dresses a player's R15 character as a hero (or one of Ben's aliens), built
@@ -301922,10 +302252,345 @@ return Looks
 </Properties>
 </Item>
 </Item>
-<Item class="Folder" referent="RBX18820"><Properties>
+<Item class="Folder" referent="RBX18822"><Properties>
 <string name="Name">Systems</string>
 </Properties>
-<Item class="ModuleScript" referent="RBX18821"><Properties>
+<Item class="ModuleScript" referent="RBX18823"><Properties>
+<string name="Name">Boss</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- The Rift Titan: a three-phase boss fight in the classic action-game mould.
+--   Phase 1  Stomp (a ground shockwave: jump over it) and Charge (dodge it).
+--   Phase 2  adds a Volley of shots (parry them back with a counter).
+--   Phase 3  enraged: faster, and summons gremlins.
+-- Every attack is telegraphed. Enough hits break its posture: it staggers and
+-- finishers deal triple damage. It appears when all three rifts are closed,
+-- or from the "Titan Hunt" mission. Health scales with the players nearby.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+
+local Boss = {}
+local Net, Enemies, Combat, Progression, PlayerState
+local active = nil
+local B = Config.Boss
+
+local function rootOf(player)
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		return character:FindFirstChild("HumanoidRootPart")
+	end
+	return nil
+end
+
+local function onGround(root)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { root.Parent }
+	return workspace:Raycast(root.Position, Vector3.new(0, -5.5, 0), params) ~= nil
+end
+
+local function buildModel(pos)
+	local model = Instance.new("Model")
+	model.Name = "RiftTitan"
+	local s = B.Size
+	local root = Instance.new("Part")
+	root.Name = "Body"
+	root.Shape = Enum.PartType.Ball
+	root.Size = Vector3.new(s, s, s)
+	root.Color = B.Color
+	root.Material = Enum.Material.SmoothPlastic
+	root.CFrame = CFrame.new(pos)
+	root.CustomPhysicalProperties = PhysicalProperties.new(2, 0.3, 0.3)
+	root.Parent = model
+	local function add(size, offset, color, material, shape)
+		local p = Instance.new("Part")
+		p.Size = size
+		p.Color = color
+		p.Material = material or Enum.Material.SmoothPlastic
+		p.Shape = shape or Enum.PartType.Ball
+		p.CanCollide = false
+		p.CanQuery = false
+		p.Massless = true
+		p.CFrame = root.CFrame * offset
+		p.Parent = model
+		local w = Instance.new("WeldConstraint")
+		w.Part0 = root
+		w.Part1 = p
+		w.Parent = p
+		return p
+	end
+	for _, x in ipairs({ -1, 1 }) do
+		add(Vector3.new(6, 6, 6), CFrame.new(x * 4.5, 3, -8.5), Color3.new(1, 1, 1))
+		add(Vector3.new(3, 3, 3), CFrame.new(x * 4.5, 3, -11), Color3.fromRGB(255, 60, 90), Enum.Material.Neon)
+		add(Vector3.new(2.5, 12, 2.5), CFrame.new(x * 7, 11, 0) * CFrame.Angles(0, 0, -x * 0.5), Color3.fromRGB(250, 230, 200), nil, Enum.PartType.Block)
+		add(Vector3.new(5, 14, 5), CFrame.new(x * 12, -3, -2), B.Color, nil, Enum.PartType.Block)
+	end
+	add(Vector3.new(12, 2, 1.5), CFrame.new(0, -4, -10.5), Color3.fromRGB(255, 230, 255), Enum.Material.Neon, Enum.PartType.Block)
+	for i = 0, 7 do
+		local a = i / 8 * math.pi * 2
+		add(Vector3.new(1.6, 4, 1.6), CFrame.new(math.cos(a) * 6, 11.5, math.sin(a) * 6), Color3.fromRGB(255, 210, 60), Enum.Material.Neon, Enum.PartType.Block)
+	end
+	local att = Instance.new("Attachment")
+	att.Parent = root
+	local align = Instance.new("AlignPosition")
+	align.Mode = Enum.PositionAlignmentMode.OneAttachment
+	align.Attachment0 = att
+	align.MaxForce = 5e6
+	align.MaxVelocity = B.Speed
+	align.Responsiveness = 20
+	align.Position = pos
+	align.Parent = root
+	local orient = Instance.new("AlignOrientation")
+	orient.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	orient.Attachment0 = att
+	orient.MaxTorque = 5e6
+	orient.Responsiveness = 8
+	orient.Parent = root
+	model.PrimaryPart = root
+	model:SetAttribute("Enemy", "Boss")
+	model.Parent = workspace:FindFirstChild("Enemies") or workspace
+	root:SetNetworkOwner(nil)
+	return model, root, align, orient
+end
+
+local function nearestPlayer(pos)
+	local best, bestDist = nil, 400
+	for _, player in ipairs(Players:GetPlayers()) do
+		local r = rootOf(player)
+		if r and (r.Position - pos).Magnitude < bestDist then
+			best, bestDist = player, (r.Position - pos).Magnitude
+		end
+	end
+	return best, bestDist
+end
+
+local function telegraph(e, time, label)
+	e.Model:SetAttribute("Windup", workspace:GetServerTimeNow())
+	Net.fireAll("Fx", { Kind = "Telegraph", Model = e.Model, Time = time, Boss = true, Label = label })
+end
+
+local function stomp(e)
+	local center = e.Root.Position - Vector3.new(0, B.Size * 0.5, 0)
+	local hit = {}
+	Net.fireAll("Fx", { Kind = "Shockwave", Pos = center, Radius = B.StompRadius, Time = 1.2, Color = Color3.fromRGB(255, 80, 200) })
+	Net.fireAll("Fx", { Kind = "Shake", Pos = center, Amount = 0.8 })
+	task.spawn(function()
+		local t0 = os.clock()
+		while os.clock() - t0 < 1.2 and e.Health > 0 do
+			local radius = (os.clock() - t0) / 1.2 * B.StompRadius
+			for _, player in ipairs(Players:GetPlayers()) do
+				local r = rootOf(player)
+				if r and not hit[player] then
+					local flat = Vector3.new(r.Position.X - center.X, 0, r.Position.Z - center.Z).Magnitude
+					if math.abs(flat - radius) < 4 and onGround(r) then
+						hit[player] = true
+						Combat.damagePlayer(player, B.StompDamage, center)
+					end
+				end
+			end
+			task.wait(0.05)
+		end
+	end)
+end
+
+local function charge(e, target)
+	local r = rootOf(target)
+	if not r then
+		return
+	end
+	local dir = Vector3.new(r.Position.X - e.Root.Position.X, 0, r.Position.Z - e.Root.Position.Z)
+	if dir.Magnitude < 1 then
+		return
+	end
+	dir = dir.Unit
+	local hit = {}
+	e.Align.MaxVelocity = 70
+	local goal = e.Root.Position + dir * 90
+	e.Align.Position = goal
+	task.spawn(function()
+		local t0 = os.clock()
+		while os.clock() - t0 < 1.4 and e.Health > 0 do
+			for _, player in ipairs(Players:GetPlayers()) do
+				local pr = rootOf(player)
+				if pr and not hit[player] and (pr.Position - e.Root.Position).Magnitude < B.Size * 0.5 + 4 then
+					hit[player] = true
+					Combat.damagePlayer(player, B.ChargeDamage, e.Root.Position)
+					pr.AssemblyLinearVelocity = dir * 80 + Vector3.new(0, 40, 0)
+				end
+			end
+			task.wait(0.05)
+		end
+		e.Align.MaxVelocity = e.Speed
+	end)
+end
+
+local function volley(e, target)
+	local r = rootOf(target)
+	if not r then
+		return
+	end
+	local from = e.Root.Position + Vector3.new(0, 3, 0)
+	local base = r.Position - from
+	for k = -2, 2 do
+		local dir = CFrame.Angles(0, math.rad(k * 9), 0):VectorToWorldSpace(base)
+		Enemies.fireShot(e, from, from + dir, 65, B.SpitDamage, Color3.fromRGB(255, 80, 200))
+	end
+end
+
+local function think(e, now, step)
+	if e.Stun > 0 then
+		e.Stun = e.Stun - step
+		if e.Stun <= 0 then
+			e.Align.Enabled = true
+		end
+	end
+	local frac = e.Health / e.MaxHealth
+	local phase = frac > 0.66 and 1 or (frac > 0.33 and 2 or 3)
+	if phase ~= e.PhaseNum then
+		e.PhaseNum = phase
+		if phase > 1 then
+			Net.fireAll("Notify", { Banner = B.Name .. (phase == 3 and " is ENRAGED!" or " - Phase 2"), Color = Color3.fromRGB(255, 80, 200) })
+		end
+		e.Speed = B.Speed * (phase == 3 and 1.6 or 1)
+		e.Align.MaxVelocity = e.Speed
+	end
+	workspace:SetAttribute("BossHealth", math.max(0, math.floor(e.Health)))
+	if e.Staggered > now then
+		e.Align.Position = e.Root.Position
+		return
+	elseif e.Model:GetAttribute("Staggered") then
+		e.Model:SetAttribute("Staggered", nil)
+	end
+	if now - e.PostureAt > 2 and e.Posture > 0 then
+		e.Posture = math.max(0, e.Posture - Config.Combat.PostureDecay * 2 * step)
+	end
+	local target = nearestPlayer(e.Root.Position)
+	if e.Pending then
+		if now >= e.PendingAt then
+			local attack = e.Pending
+			e.Pending = nil
+			e.Model:SetAttribute("Windup", nil)
+			e.State = "Chase"
+			if attack == "Stomp" then
+				stomp(e)
+			elseif attack == "Charge" then
+				charge(e, e.Target)
+			elseif attack == "Volley" then
+				volley(e, e.Target)
+			end
+			e.NextAttack = now + (phase == 3 and 2.2 or 3.4)
+		end
+		return
+	end
+	if not target then
+		return
+	end
+	local tr = rootOf(target)
+	local ground = Enemies.groundAt(tr.Position)
+	local flat = Vector3.new(tr.Position.X - e.Root.Position.X, 0, tr.Position.Z - e.Root.Position.Z)
+	if flat.Magnitude > 1 then
+		e.Orient.CFrame = CFrame.lookAt(Vector3.zero, flat.Unit)
+	end
+	if flat.Magnitude > 30 then
+		e.Align.Position = Vector3.new(tr.Position.X, ground.Y + B.Size * 0.5 + 1, tr.Position.Z)
+	else
+		e.Align.Position = Vector3.new(e.Root.Position.X, ground.Y + B.Size * 0.5 + 1, e.Root.Position.Z)
+	end
+	if phase == 3 and now >= (e.NextSummon or 0) then
+		e.NextSummon = now + 15
+		Enemies.spawnWave(e.Root.Position, { Gremlin = 3 }, { Mission = "Boss" }, 25)
+	end
+	if now >= e.NextAttack then
+		local options = { "Stomp", "Charge" }
+		if phase >= 2 then
+			table.insert(options, "Volley")
+		end
+		local attack = options[math.random(1, #options)]
+		local windup = attack == "Stomp" and 1.0 or 0.8
+		e.Pending = attack
+		e.PendingAt = now + windup
+		e.Target = target
+		e.State = "BossWindup" -- not cancellable by counters; parry its shots instead
+		telegraph(e, windup, attack)
+	end
+end
+
+function Boss.active()
+	return active
+end
+
+-- Spawns the Titan at `pos` (ground). onDeath(attacker) runs when it falls.
+function Boss.spawn(pos, onDeath)
+	if active and active.Health > 0 and active.Model.Parent then
+		return active
+	end
+	local nearby = 0
+	for _, player in ipairs(Players:GetPlayers()) do
+		local r = rootOf(player)
+		if r and (r.Position - pos).Magnitude < 600 then
+			nearby = nearby + 1
+		end
+	end
+	local health = B.Health * (1 + B.PerExtraPlayer * math.max(0, nearby - 1))
+	local ground = Enemies.groundAt(pos)
+	local model, root, align, orient = buildModel(ground + Vector3.new(0, B.Size * 0.5 + 1, 0))
+	local e = {
+		Model = model, Root = root, Align = align, Orient = orient, IsBoss = true, Type = "Boss",
+		Def = { Posture = B.Posture, Xp = B.Xp, Cash = B.Cash, Color = B.Color, Heat = 0 },
+		Health = health, MaxHealth = health, Posture = 0, PostureAt = 0, Staggered = 0, Stun = 0,
+		State = "Chase", NextAttack = os.clock() + 3, Radius = B.Size * 0.5, Speed = B.Speed, PhaseNum = 1,
+		Home = ground, Think = think,
+	}
+	e.OnDeath = function(attacker)
+		workspace:SetAttribute("BossActive", false)
+		Net.fireAll("Notify", { Banner = B.Name .. " DEFEATED!", Color = Color3.fromRGB(255, 220, 90) })
+		for _, player in ipairs(Players:GetPlayers()) do
+			local r = rootOf(player)
+			if r and (r.Position - e.Root.Position).Magnitude < 400 then
+				Progression.award(player, B.Xp, B.Cash, B.Name)
+			end
+		end
+		active = nil
+		if onDeath then
+			onDeath(attacker)
+		end
+	end
+	Enemies.register(e)
+	active = e
+	workspace:SetAttribute("BossName", B.Name)
+	workspace:SetAttribute("BossMax", math.floor(health))
+	workspace:SetAttribute("BossHealth", math.floor(health))
+	workspace:SetAttribute("BossActive", true)
+	Net.fireAll("Notify", { Banner = "THE " .. string.upper(B.Name) .. " HAS ARRIVED!", Text = "Jump its shockwaves, dodge its charge, counter its shots", Color = Color3.fromRGB(255, 80, 200) })
+	Net.fireAll("Fx", { Kind = "Burst", Pos = root.Position, Color = B.Color, Count = 120, Gravity = true })
+	return e
+end
+
+function Boss.init(systems)
+	Net, Enemies, Combat, Progression, PlayerState = systems.Net, systems.Enemies, systems.Combat, systems.Progression, systems.Players
+end
+
+function Boss.start()
+	local MapData = require(Shared:WaitForChild("MapData"))
+	local anchors = MapData.Anchors or {}
+	Enemies.onAllRiftsClosed = function()
+		if anchors.Plaza then
+			task.delay(4, function()
+				Boss.spawn(anchors.Plaza)
+			end)
+		end
+	end
+end
+
+return Boss
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18824"><Properties>
 <string name="Name">Collectibles</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Rift shards: crystals scattered over every world (rooftops, ledges, and
@@ -301941,7 +302606,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local MapData = require(Shared:WaitForChild("MapData"))
 
 local Collectibles = {}
-local Net, PlayerState
+local Net, PlayerState, Profiles, Progression
 local shards = {}  -- { Id, Pos, Level }
 local taken = {}   -- [player] = { [id] = true }
 
@@ -302019,7 +302684,21 @@ local function buildShard(id, pos, folder)
 end
 
 function Collectibles.init(systems)
-	Net, PlayerState = systems.Net, systems.Players
+	Net, PlayerState, Profiles, Progression = systems.Net, systems.Players, systems.Profiles, systems.Progression
+end
+
+-- Counts per level for the HUD.
+local function syncCounts(player, mine)
+	local have, totals = {}, {}
+	for _, s in ipairs(shards) do
+		totals[s.Level] = (totals[s.Level] or 0) + 1
+		if mine[s.Id] then
+			have[s.Level] = (have[s.Level] or 0) + 1
+		end
+	end
+	for level in pairs(totals) do
+		player:SetAttribute("Shards_" .. level, have[level] or 0)
+	end
 end
 
 function Collectibles.start()
@@ -302045,11 +302724,23 @@ function Collectibles.start()
 		workspace:SetAttribute("ShardTotal_" .. levelName, n)
 	end
 
+	-- Saved shards come back with the profile (and are hidden for that player).
+	Profiles.onLoaded(function(player, data)
+		local mine = taken[player] or {}
+		taken[player] = mine
+		for _, id in ipairs(data.Shards) do
+			if shards[id] then
+				mine[id] = true
+				Net.fire("Fx", player, { Kind = "ShardTaken", Id = id, Pos = shards[id].Pos, Silent = true })
+			end
+		end
+		syncCounts(player, mine)
+	end)
 	Players.PlayerAdded:Connect(function(player)
-		taken[player] = {}
+		taken[player] = taken[player] or {}
 	end)
 	for _, player in ipairs(Players:GetPlayers()) do
-		taken[player] = {}
+		taken[player] = taken[player] or {}
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		taken[player] = nil
@@ -302089,6 +302780,11 @@ function Collectibles.start()
 							end
 						end
 						player:SetAttribute("Shards_" .. s.Level, have)
+						local data = Profiles.get(player)
+						if data then
+							table.insert(data.Shards, s.Id)
+						end
+						Progression.award(player, 15, 10, "Rift shard")
 						Net.fire("Fx", player, { Kind = "ShardTaken", Id = s.Id, Pos = s.Pos })
 						Net.fire("Notify", player, {
 							Text = ("Rift shard %d/%d (+health, energy, ultimate)"):format(have, total),
@@ -302106,7 +302802,7 @@ return Collectibles
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18822"><Properties>
+<Item class="ModuleScript" referent="RBX18825"><Properties>
 <string name="Name">Combat</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Server-authoritative combat: attacks with 3-hit combos (third hit is a
@@ -302189,16 +302885,88 @@ function Combat.isImmune(player)
 	return st.Hero == "Ben" and st.Omni:IsInvulnerable()
 end
 
-function Combat.damagePlayer(player, amount)
+function Combat.damagePlayer(player, amount, sourcePos)
 	local character, humanoid = charOf(player)
 	if not character or Combat.isImmune(player) then
 		return
 	end
-	humanoid:TakeDamage(amount)
-	regenAt[player] = os.clock() + Config.Player.RegenDelay
 	local st = PlayerState.get(player)
+	local now = os.clock()
+	if st.BlockUntil and now < st.BlockUntil then
+		amount = amount * (1 - Config.Combat.BlockReduce)
+		Net.fireAll("Fx", { Kind = "Block", Player = player })
+	end
+	humanoid:TakeDamage(amount)
+	regenAt[player] = now + Config.Player.RegenDelay
 	PlayerState.addMeter(st, amount * 0.25)
 	character:SetAttribute("HurtAt", workspace:GetServerTimeNow())
+	-- Getting hit breaks the combo.
+	st.Combo = 0
+	player:SetAttribute("Combo", 0)
+end
+
+-- Every landed hit grows the freeflow combo; it lapses after a few quiet seconds.
+function Combat.registerHit(player)
+	local st = PlayerState.get(player)
+	if not st then
+		return
+	end
+	local now = os.clock()
+	if now - (st.ComboAt or 0) > Config.Combat.ComboTimeout then
+		st.Combo = 0
+	end
+	st.Combo = (st.Combo or 0) + 1
+	st.ComboAt = now
+	player:SetAttribute("Combo", st.Combo)
+	player:SetAttribute("ComboAt", workspace:GetServerTimeNow())
+end
+
+local function onCounter(player)
+	local st = PlayerState.get(player)
+	local character, _, root = charOf(player)
+	if not st or not character or not canAttack(st, character) then
+		return
+	end
+	if not PlayerState.ready(st, "Counter", Config.Combat.CounterCooldown) then
+		return
+	end
+	local countered = Enemies.counter(player, root.Position)
+	if countered > 0 then
+		st.DodgeUntil = math.max(st.DodgeUntil, os.clock() + Config.Combat.CounterImmunity)
+		character:SetAttribute("CounterAt", workspace:GetServerTimeNow())
+		Net.fireAll("Fx", { Kind = "Counter", Player = player, Pos = root.Position, Count = countered })
+	else
+		st.BlockUntil = os.clock() + Config.Combat.BlockTime
+		character:SetAttribute("BlockAt", workspace:GetServerTimeNow())
+	end
+end
+
+local function onTakedown(player)
+	local st = PlayerState.get(player)
+	local character, _, root = charOf(player)
+	if not st or not character or not canAttack(st, character) then
+		return
+	end
+	if os.clock() - (st.ComboAt or 0) > Config.Combat.ComboTimeout or (st.Combo or 0) < Config.Combat.TakedownCombo then
+		return
+	end
+	local best, bestDist = nil, Config.Combat.TakedownRange
+	for _, e in ipairs(Enemies.list()) do
+		if e.Health > 0 and e.Model.Parent then
+			local d = (e.Root.Position - root.Position).Magnitude - e.Radius
+			if d < bestDist then
+				best, bestDist = e, d
+			end
+		end
+	end
+	if not best then
+		return
+	end
+	st.Combo = st.Combo - Config.Combat.TakedownCombo
+	player:SetAttribute("Combo", st.Combo)
+	Net.fireAll("Fx", { Kind = "Takedown", Player = player, Pos = best.Root.Position, Model = best.Model })
+	local amount = best.IsBoss and 250 or best.Health + 1
+	Enemies.damage(best, amount, Vector3.new(0, 60, 0), player, { Posture = 2 })
 end
 
 local function hitEnemiesInSphere(center, radius, damage, knockScale, attacker, alreadyHit)
@@ -302206,7 +302974,7 @@ local function hitEnemiesInSphere(center, radius, damage, knockScale, attacker, 
 	for _, e in ipairs(Enemies.list()) do
 		if e.Health > 0 and e.Root.Parent and not (alreadyHit and alreadyHit[e]) then
 			local to = e.Root.Position - center
-			if to.Magnitude < radius + 1.6 then
+			if to.Magnitude < radius + e.Radius then
 				if alreadyHit then
 					alreadyHit[e] = true
 				end
@@ -302303,7 +303071,7 @@ local function stepProjectiles(dt)
 				local rel = e.Root.Position - shot.Pos
 				local along = math.clamp(rel:Dot(move.Unit), 0, move.Magnitude)
 				local closest = shot.Pos + move.Unit * along
-				if (e.Root.Position - closest).Magnitude < shot.Radius + 1.8 then
+				if (e.Root.Position - closest).Magnitude < shot.Radius + e.Radius + 0.2 then
 					local dir = shot.Vel.Unit
 					Enemies.damage(e, shot.Damage, dir * 40 * shot.Knock + Vector3.new(0, 15 * shot.Knock, 0), shot.Owner)
 					endShot(shot, closest)
@@ -302377,9 +303145,9 @@ local function onAttack(player, aim)
 				local to = e.Root.Position - root.Position
 				local flat = Vector3.new(to.X, 0, to.Z)
 				local inFront = flat.Magnitude < 0.01 or flat.Unit:Dot(flatAim) > (finisher and -1.1 or 0.2)
-				if flat.Magnitude < range + 2.5 * scale and math.abs(to.Y) < 6 * scale and inFront then
+				if flat.Magnitude < range + 2.5 * scale + e.Radius and math.abs(to.Y) < 6 * scale + e.Radius and inFront then
 					local dir = flat.Magnitude > 0.01 and flat.Unit or flatAim
-					Enemies.damage(e, a.Damage * dmg, dir * (a.Knockback or 40) * knock * 0.6 + Vector3.new(0, (a.Knockback or 40) * knock * 0.3, 0), player)
+					Enemies.damage(e, a.Damage * dmg, dir * (a.Knockback or 40) * knock * 0.6 + Vector3.new(0, (a.Knockback or 40) * knock * 0.3, 0), player, { Melee = true, Posture = finisher and 1.6 or 1 })
 					hits = hits + 1
 				end
 			end
@@ -302406,7 +303174,7 @@ local function coneDamage(player, root, aim, range, halfAngle, damage, knock)
 		if e.Health > 0 and e.Root.Parent then
 			local to = e.Root.Position - root.Position
 			local d = to.Magnitude
-			if d < range and d > 0.1 and to.Unit:Dot(aim) > cosHalf then
+			if d < range + e.Radius and d > 0.1 and to.Unit:Dot(aim) > cosHalf then
 				Enemies.damage(e, damage, to.Unit * knock + Vector3.new(0, knock * 0.3, 0), player)
 				hits = hits + 1
 			end
@@ -302540,6 +303308,8 @@ function Combat.init(systems)
 	Net.on("Attack", 20, onAttack)
 	Net.on("Ability", 10, onAbility)
 	Net.on("Pound", 3, onPound)
+	Net.on("Counter", 6, onCounter)
+	Net.on("Takedown", 3, onTakedown)
 end
 
 function Combat.start()
@@ -302606,7 +303376,7 @@ return Combat
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18823"><Properties>
+<Item class="ModuleScript" referent="RBX18826"><Properties>
 <string name="Name">Courses</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Timed courses through glowing gates: the Nexus Flight Ring Challenge and
@@ -302620,12 +303390,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MapData = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MapData"))
 
 local Courses = {}
-local Net
+local Net, Profiles, Progression
 local courses = {}  -- { Name, Gates = { { Part, Pos, Radius } } }
 local runs = {}     -- [player][courseIndex] = { Next, Start, Best }
 
 function Courses.init(systems)
-	Net = systems.Net
+	Net, Profiles, Progression = systems.Net, systems.Profiles, systems.Progression
 end
 
 function Courses.start()
@@ -302677,10 +303447,17 @@ function Courses.start()
 						run.Next = run.Next + 1
 						if run.Next > #course.Gates then
 							local time = now - run.Start
+							local data = Profiles.get(player)
+							local saved = data and data.Best[course.Name]
+							run.Best = run.Best or saved
 							local best = not run.Best or time < run.Best
 							if best then
 								run.Best = time
+								if data then
+									data.Best[course.Name] = math.floor(time * 100) / 100
+								end
 							end
+							Progression.award(player, best and 100 or 50, best and 60 or 25, course.Name)
 							Net.fire("Notify", player, { Banner = ("%s: %.2fs%s"):format(course.Name, time, best and "  NEW BEST!" or ""), Color = Color3.fromRGB(140, 255, 200) })
 							run.Next = 1
 						end
@@ -302696,12 +303473,15 @@ return Courses
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18824"><Properties>
+<Item class="ModuleScript" referent="RBX18827"><Properties>
 <string name="Name">Enemies</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
--- Rift gremlins and Retroville's rift patrols: walk up to a purple rift and it
--- opens; beat three waves to close it. Gremlins hover toward the nearest
--- player, deal contact damage, and get knocked around by hits.
+-- Enemies, freeflow-combat style: every attack is telegraphed (a wind-up the
+-- target sees as a "!" and a COUNTER prompt), so a well-timed counter cancels
+-- it. Hits build posture; a broken posture staggers the enemy and opens it to
+-- a finisher. Types: Gremlin (melee), Brute (heavy ground slam), Spitter
+-- (ranged; its shots can be parried back), Hunter (wanted-level squads).
+-- Also runs Retroville's rift patrols (3 waves to close a rift).
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -302712,120 +303492,256 @@ local Config = require(Shared:WaitForChild("Config"))
 local MapData = require(Shared:WaitForChild("MapData"))
 
 local Enemies = {}
-local Net, PlayerState, Combat
-local list = {}   -- { Model, Root, Align, Health, Rift, Stun, AttackAt, Phase }
-local rifts = {}  -- { Name, Pos, Level, Wave, Closed, Visual }
+local Net, PlayerState, Combat, Progression, HeatSystem
+local list = {}
+local rifts = {}
+local shots = {}      -- enemy projectiles
+local nextShot = -1   -- negative ids: enemy shots (player shots are positive)
 local folder
 local rng = Random.new(1337)
-
 local PURPLE = Color3.fromRGB(170, 80, 230)
 
-local function makeGremlin(pos)
+local function addPart(model, root, size, offset, color, material, shape)
+	local p = Instance.new("Part")
+	p.Size = size
+	p.Color = color
+	p.Material = material or Enum.Material.SmoothPlastic
+	p.Shape = shape or Enum.PartType.Ball
+	p.CanCollide = false
+	p.CanQuery = false
+	p.Massless = true
+	p.CFrame = root.CFrame * offset
+	p.Parent = model
+	local w = Instance.new("WeldConstraint")
+	w.Part0 = root
+	w.Part1 = p
+	w.Parent = p
+	return p
+end
+
+local function makeModel(typeName, def, pos)
 	local model = Instance.new("Model")
-	model.Name = "RiftGremlin"
+	model.Name = typeName
+	local s = def.Size
 	local root = Instance.new("Part")
 	root.Name = "Body"
 	root.Shape = Enum.PartType.Ball
-	root.Size = Vector3.new(3.2, 3.2, 3.2)
-	root.Color = PURPLE
+	root.Size = Vector3.new(s, s, s)
+	root.Color = def.Color
 	root.Material = Enum.Material.SmoothPlastic
 	root.CFrame = CFrame.new(pos)
 	root.CustomPhysicalProperties = PhysicalProperties.new(0.5, 0.3, 0.5)
 	root.Parent = model
-	local function add(size, offset, color, material, shape)
-		local p = Instance.new("Part")
-		p.Size = size
-		p.Color = color
-		p.Material = material or Enum.Material.SmoothPlastic
-		p.Shape = shape or Enum.PartType.Ball
-		p.CanCollide = false
-		p.Massless = true
-		p.CFrame = root.CFrame * offset
-		p.Parent = model
-		local w = Instance.new("WeldConstraint")
-		w.Part0 = root
-		w.Part1 = p
-		w.Parent = p
-		return p
-	end
+	local k = s / 3.2
 	for _, x in ipairs({ -0.6, 0.6 }) do
-		add(Vector3.new(1.1, 1.1, 1.1), CFrame.new(x, 0.5, -1.2), Color3.new(1, 1, 1))
-		add(Vector3.new(0.5, 0.5, 0.5), CFrame.new(x, 0.5, -1.65), Color3.fromRGB(20, 10, 30))
-		add(Vector3.new(0.4, 1.4, 0.4), CFrame.new(x * 1.3, 1.6, 0) * CFrame.Angles(0, 0, -x * 0.6), Color3.fromRGB(90, 30, 140), nil, Enum.PartType.Block)
+		addPart(model, root, Vector3.new(1.1, 1.1, 1.1) * k, CFrame.new(x * k, 0.5 * k, -1.2 * k), Color3.new(1, 1, 1))
+		addPart(model, root, Vector3.new(0.5, 0.5, 0.5) * k, CFrame.new(x * k, 0.5 * k, -1.65 * k), Color3.fromRGB(20, 10, 30))
 	end
-	add(Vector3.new(1.4, 0.3, 0.3), CFrame.new(0, -0.5, -1.45), Color3.fromRGB(255, 220, 255), Enum.Material.Neon, Enum.PartType.Block)
+	if typeName == "Brute" then
+		for _, x in ipairs({ -1, 1 }) do
+			addPart(model, root, Vector3.new(0.6, 2.2, 0.6) * k, CFrame.new(x * 1.1 * k, 1.6 * k, 0) * CFrame.Angles(0, 0, -x * 0.5), Color3.fromRGB(240, 220, 200), nil, Enum.PartType.Block)
+			addPart(model, root, Vector3.new(1.2, 2.6, 1.2) * k, CFrame.new(x * 1.7 * k, -0.4 * k, -0.3 * k), def.Color, nil, Enum.PartType.Block)
+		end
+		addPart(model, root, Vector3.new(2.2, 0.5, 0.4) * k, CFrame.new(0, -0.6 * k, -1.45 * k), Color3.fromRGB(255, 240, 220), Enum.Material.Neon, Enum.PartType.Block)
+	elseif typeName == "Spitter" then
+		addPart(model, root, Vector3.new(0.9, 0.9, 1.6) * k, CFrame.new(0, -0.3 * k, -1.5 * k), Color3.fromRGB(60, 140, 60), nil, Enum.PartType.Block)
+		addPart(model, root, Vector3.new(0.5, 0.5, 0.5) * k, CFrame.new(0, -0.3 * k, -2.3 * k), Color3.fromRGB(200, 255, 120), Enum.Material.Neon)
+	elseif typeName == "Hunter" then
+		addPart(model, root, Vector3.new(2.6, 0.6, 1.0) * k, CFrame.new(0, 0.5 * k, -1.2 * k), Color3.fromRGB(30, 30, 40), nil, Enum.PartType.Block)
+		addPart(model, root, Vector3.new(2.0, 0.15, 0.2) * k, CFrame.new(0, 0.55 * k, -1.72 * k), Color3.fromRGB(255, 60, 60), Enum.Material.Neon, Enum.PartType.Block)
+		addPart(model, root, Vector3.new(0.15, 1.6, 0.15) * k, CFrame.new(0.6 * k, 2 * k, 0), Color3.fromRGB(200, 200, 210), nil, Enum.PartType.Block)
+	else
+		for _, x in ipairs({ -0.6, 0.6 }) do
+			addPart(model, root, Vector3.new(0.4, 1.4, 0.4) * k, CFrame.new(x * 1.3 * k, 1.6 * k, 0) * CFrame.Angles(0, 0, -x * 0.6), Color3.fromRGB(90, 30, 140), nil, Enum.PartType.Block)
+		end
+		addPart(model, root, Vector3.new(1.4, 0.3, 0.3) * k, CFrame.new(0, -0.5 * k, -1.45 * k), Color3.fromRGB(255, 220, 255), Enum.Material.Neon, Enum.PartType.Block)
+	end
 	local att = Instance.new("Attachment")
 	att.Parent = root
 	local align = Instance.new("AlignPosition")
 	align.Mode = Enum.PositionAlignmentMode.OneAttachment
 	align.Attachment0 = att
-	align.MaxForce = 6000
-	align.MaxVelocity = Config.Enemy.Speed
+	align.MaxForce = 6000 * k * k * k
+	align.MaxVelocity = def.Speed
 	align.Responsiveness = 25
 	align.Position = pos
 	align.Parent = root
 	local orient = Instance.new("AlignOrientation")
 	orient.Mode = Enum.OrientationAlignmentMode.OneAttachment
 	orient.Attachment0 = att
-	orient.MaxTorque = 5000
+	orient.MaxTorque = 5000 * k * k * k
 	orient.Responsiveness = 15
 	orient.Parent = root
 	model.PrimaryPart = root
-	model:SetAttribute("Enemy", true)
+	model:SetAttribute("Enemy", typeName)
+	model:SetAttribute("MaxHealth", def.Health)
+	model:SetAttribute("Health", def.Health)
 	model.Parent = folder
 	root:SetNetworkOwner(nil)
 	return model, root, align, orient
 end
 
-function Enemies.spawn(pos, riftIndex)
+function Enemies.groundAt(pos)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { folder }
-	local down = workspace:Raycast(pos + Vector3.new(0, 20, 0), Vector3.new(0, -80, 0), params)
-	if down then
-		pos = down.Position + Vector3.new(0, 4, 0)
-	end
-	local model, root, align, orient = makeGremlin(pos)
-	table.insert(list, {
-		Model = model, Root = root, Align = align, Orient = orient, Health = Config.Enemy.Health,
-		Rift = riftIndex, Stun = 0, AttackAt = 0, Phase = rng:NextNumber(0, 6.28), Home = pos,
-	})
-	Net.fireAll("Fx", { Kind = "Burst", Pos = pos, Color = PURPLE, Count = 12 })
+	local hit = workspace:Raycast(pos + Vector3.new(0, 30, 0), Vector3.new(0, -120, 0), params)
+	return hit and hit.Position or pos
+end
+
+-- opts: { Rift = index, Mission = tag, HuntFor = player }
+function Enemies.spawn(pos, typeName, opts)
+	typeName = typeName or "Gremlin"
+	opts = opts or {}
+	local def = Config.EnemyTypes[typeName]
+	pos = Enemies.groundAt(pos) + Vector3.new(0, def.Size * 0.5 + 1, 0)
+	local model, root, align, orient = makeModel(typeName, def, pos)
+	local e = {
+		Model = model, Root = root, Align = align, Orient = orient, Def = def, Type = typeName,
+		Health = def.Health, MaxHealth = def.Health, Posture = 0, PostureAt = 0, Staggered = 0,
+		State = "Chase", StateUntil = 0, NextAttack = os.clock() + rng:NextNumber(0.5, 2), Stun = 0,
+		Radius = def.Size * 0.5, Rift = opts.Rift, Mission = opts.Mission, HuntFor = opts.HuntFor,
+		Phase = rng:NextNumber(0, 6.28), Home = pos,
+	}
+	table.insert(list, e)
+	Net.fireAll("Fx", { Kind = "Burst", Pos = pos, Color = def.Color, Count = 12 })
+	return e
+end
+
+-- Bosses and other custom enemies join the same list so every attack hits them.
+function Enemies.register(e)
+	table.insert(list, e)
 end
 
 function Enemies.list()
 	return list
 end
 
--- Damage from a player's attack. Returns true when it killed.
-function Enemies.damage(enemy, amount, knock, attacker)
-	if enemy.Health <= 0 then
-		return false
+function Enemies.count(predicate)
+	local n = 0
+	for _, e in ipairs(list) do
+		if e.Health > 0 and e.Model.Parent and predicate(e) then
+			n = n + 1
+		end
 	end
-	enemy.Health = enemy.Health - amount
-	enemy.Stun = 0.35
-	enemy.Align.Enabled = false
-	enemy.Root.AssemblyLinearVelocity = knock
-	Net.fireAll("Fx", { Kind = "Hit", Pos = enemy.Root.Position, Color = Color3.new(1, 1, 1), Model = enemy.Model, Attacker = attacker })
+	return n
+end
+
+local function kill(e, attacker)
+	e.Health = 0
+	Net.fireAll("Fx", { Kind = "Burst", Pos = e.Root.Position, Color = e.Def.Color or PURPLE, Count = e.IsBoss and 120 or 26, Gravity = true })
+	if e.OnDeath then
+		e.OnDeath(attacker)
+	end
+	e.Model:Destroy()
 	local st = attacker and PlayerState.get(attacker)
 	if st then
-		PlayerState.addMeter(st, amount * 0.06)
-	end
-	if enemy.Health <= 0 then
-		Net.fireAll("Fx", { Kind = "Burst", Pos = enemy.Root.Position, Color = PURPLE, Count = 26, Gravity = true })
-		enemy.Model:Destroy()
-		if st then
-			PlayerState.addMeter(st, 5)
-			st.Kills = st.Kills + 1
-			attacker:SetAttribute("Kills", st.Kills)
+		PlayerState.addMeter(st, 5)
+		st.Kills = st.Kills + 1
+		attacker:SetAttribute("Kills", st.Kills)
+		if Progression then
+			Progression.award(attacker, e.Def.Xp or 10, e.Def.Cash or 5, e.Type)
 		end
+		if HeatSystem and e.Def.Heat then
+			HeatSystem.addChaos(attacker, e.Def.Heat)
+		end
+	end
+end
+
+-- Damage from a player. opts.Melee lets a hit on a staggered enemy become a finisher.
+function Enemies.damage(e, amount, knock, attacker, opts)
+	if e.Health <= 0 or not e.Model.Parent then
+		return false
+	end
+	local now = os.clock()
+	local finisher = opts and opts.Melee and e.Staggered > now
+	if finisher then
+		amount = e.IsBoss and amount * 3 + 120 or e.Health
+		e.Staggered = 0
+		e.Model:SetAttribute("Staggered", nil)
+		Net.fireAll("Fx", { Kind = "Finisher", Pos = e.Root.Position, Model = e.Model, Attacker = attacker })
+		local humanoid = attacker and attacker.Character and attacker.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.Health = math.min(humanoid.MaxHealth, humanoid.Health + Config.Combat.FinisherHeal)
+		end
+	end
+	local st = attacker and PlayerState.get(attacker)
+	if st and Progression then
+		amount = amount * (st.DamageMul or 1)
+	end
+	e.Health = e.Health - amount
+	e.Model:SetAttribute("Health", math.max(0, math.floor(e.Health)))
+	if not e.IsBoss or finisher then
+		e.Stun = 0.35
+		e.Align.Enabled = false
+		e.Root.AssemblyLinearVelocity = knock
+	end
+	if e.State == "Windup" and not e.IsBoss and (opts and opts.Melee) then
+		-- A solid hit interrupts small enemies' wind-ups.
+		e.State = "Recover"
+		e.StateUntil = now + 0.4
+		e.Model:SetAttribute("Windup", nil)
+	end
+	-- Posture.
+	e.Posture = e.Posture + amount * (opts and opts.Posture or 1)
+	e.PostureAt = now
+	if e.Posture >= (e.Def.Posture or 100) and e.Staggered < now and e.Health > 0 then
+		e.Posture = 0
+		e.Staggered = now + Config.Combat.StaggerTime
+		e.State = "Recover"
+		e.StateUntil = e.Staggered
+		e.Model:SetAttribute("Windup", nil)
+		e.Model:SetAttribute("Staggered", true)
+		Net.fireAll("Fx", { Kind = "Stagger", Pos = e.Root.Position, Model = e.Model })
+	end
+	Net.fireAll("Fx", { Kind = "Hit", Pos = e.Root.Position, Color = Color3.new(1, 1, 1), Model = e.Model, Attacker = attacker })
+	if st then
+		PlayerState.addMeter(st, amount * 0.06 * (st.MeterMul or 1))
+		if Combat then
+			Combat.registerHit(attacker)
+		end
+	end
+	if e.Health <= 0 then
+		kill(e, attacker)
 		return true
 	end
 	return false
 end
 
-local function nearestPlayer(pos)
-	local best, bestDist = nil, Config.Enemy.AggroRange
+-- Counter: cancel the wind-up of every enemy about to hit this player.
+function Enemies.counter(player, pos)
+	local countered = 0
+	for _, e in ipairs(list) do
+		if e.Health > 0 and e.Model.Parent and e.State == "Windup" and (e.Target == player or (e.Root.Position - pos).Magnitude < Config.Combat.CounterRange) then
+			if (e.Root.Position - pos).Magnitude < Config.Combat.CounterRange + e.Radius then
+				e.State = "Recover"
+				e.StateUntil = os.clock() + 1.0
+				e.Model:SetAttribute("Windup", nil)
+				local away = e.Root.Position - pos
+				away = Vector3.new(away.X, 0, away.Z)
+				away = away.Magnitude > 0.1 and away.Unit or Vector3.new(0, 0, 1)
+				Enemies.damage(e, Config.Combat.CounterDamage, away * 45 + Vector3.new(0, 20, 0), player, { Posture = 3, Melee = false })
+				countered = countered + 1
+			end
+		end
+	end
+	-- Parry incoming shots back at whoever fired them.
+	for id, s in pairs(shots) do
+		if (s.Pos - pos).Magnitude < 12 and s.Vel:Dot(pos - s.Pos) > 0 then
+			Net.fireAll("Fx", { Kind = "ShotEnd", Id = id, Pos = s.Pos })
+			shots[id] = nil
+			if s.Shooter and s.Shooter.Health > 0 then
+				Enemies.damage(s.Shooter, s.Damage * 2.5, Vector3.new(0, 25, 0), player, { Posture = 2 })
+				Net.fireAll("Fx", { Kind = "Deflect", From = s.Pos, To = s.Shooter.Root.Position })
+			end
+			countered = countered + 1
+		end
+	end
+	return countered
+end
+
+local function nearestPlayer(pos, range)
+	local best, bestDist = nil, range or Config.Enemy.AggroRange
 	for _, player in ipairs(Players:GetPlayers()) do
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -302840,6 +303756,152 @@ local function nearestPlayer(pos)
 	return best, bestDist
 end
 
+local function rootOf(player)
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		return character:FindFirstChild("HumanoidRootPart")
+	end
+	return nil
+end
+
+function Enemies.fireShot(shooter, from, target, speed, damage, color)
+	local id = nextShot
+	nextShot = nextShot - 1
+	local vel = (target - from).Unit * speed
+	shots[id] = { Pos = from, Vel = vel, Life = 3, Damage = damage, Shooter = shooter }
+	Net.fireAll("Fx", { Kind = "Shot", Id = id, Pos = from, Vel = vel, Color = color or Color3.fromRGB(150, 255, 90), Radius = 0.9, Life = 3 })
+end
+
+local function strike(e, now)
+	local def = e.Def
+	local target = e.Target
+	local troot = rootOf(target)
+	e.Model:SetAttribute("Windup", nil)
+	e.State = "Recover"
+	e.StateUntil = now + 0.6
+	e.NextAttack = now + rng:NextNumber(1.2, 2.2)
+	if not troot then
+		return
+	end
+	if def.Ranged then
+		Enemies.fireShot(e, e.Root.Position, troot.Position, 75, def.Damage, def.Color)
+		return
+	end
+	-- Lunge, then check the hit.
+	e.Align.MaxVelocity = def.Speed * 4
+	e.Align.Position = troot.Position
+	task.delay(0.15, function()
+		e.Align.MaxVelocity = def.Speed
+		if e.Health <= 0 or not e.Model.Parent then
+			return
+		end
+		if def.Slam then
+			Net.fireAll("Fx", { Kind = "Shockwave", Pos = e.Root.Position - Vector3.new(0, e.Radius, 0), Radius = def.Slam, Time = 0.3, Color = def.Color })
+			for _, player in ipairs(Players:GetPlayers()) do
+				local r = rootOf(player)
+				if r and (r.Position - e.Root.Position).Magnitude < def.Slam + 2 then
+					Combat.damagePlayer(player, def.Damage, e.Root.Position)
+				end
+			end
+		else
+			local r = rootOf(target)
+			if r and (r.Position - e.Root.Position).Magnitude < def.Reach + e.Radius + 2 then
+				Combat.damagePlayer(target, def.Damage, e.Root.Position)
+			end
+		end
+	end)
+end
+
+local function think(e, now, step)
+	local def = e.Def
+	if e.Stun > 0 then
+		e.Stun = e.Stun - step
+		if e.Stun <= 0 then
+			e.Align.Enabled = true
+		end
+	end
+	-- Posture recovers when left alone.
+	if now - e.PostureAt > 2 and e.Posture > 0 then
+		e.Posture = math.max(0, e.Posture - Config.Combat.PostureDecay * step)
+	end
+	local pos = e.Root.Position
+	if e.Staggered > now then
+		e.Align.Position = pos
+		return
+	elseif e.Model:GetAttribute("Staggered") then
+		e.Model:SetAttribute("Staggered", nil)
+	end
+	if e.State == "Windup" then
+		if now >= e.StateUntil then
+			strike(e, now)
+		end
+		return
+	end
+	if e.State == "Recover" and now < e.StateUntil then
+		return
+	end
+	e.State = "Chase"
+	local player, dist
+	if e.HuntFor and rootOf(e.HuntFor) then
+		player = e.HuntFor
+		dist = (rootOf(player).Position - pos).Magnitude
+	else
+		player, dist = nearestPlayer(pos)
+	end
+	local bob = math.sin(now * 3 + e.Phase) * 1.2
+	if not player then
+		e.Align.Position = e.Home + Vector3.new(math.cos(now * 0.5 + e.Phase) * 6, 2 + bob, math.sin(now * 0.5 + e.Phase) * 6)
+		return
+	end
+	local target = rootOf(player).Position
+	local flat = Vector3.new(target.X - pos.X, 0, target.Z - pos.Z)
+	if flat.Magnitude > 0.1 then
+		e.Orient.CFrame = CFrame.lookAt(Vector3.zero, flat.Unit)
+	end
+	if def.Ranged and dist < def.KeepAway then
+		e.Align.Position = pos - flat.Unit * 6 + Vector3.new(0, bob, 0)
+	else
+		e.Align.Position = target + Vector3.new(0, 1 + bob, 0)
+	end
+	if dist < def.Reach + e.Radius + 1.5 and now >= e.NextAttack then
+		e.State = "Windup"
+		e.StateUntil = now + def.Windup
+		e.Target = player
+		e.Align.Position = pos
+		e.Model:SetAttribute("Windup", workspace:GetServerTimeNow())
+		Net.fireAll("Fx", { Kind = "Telegraph", Model = e.Model, Target = player, Time = def.Windup, Ranged = def.Ranged == true })
+	end
+end
+
+local function stepShots(dt)
+	for id, s in pairs(shots) do
+		s.Life = s.Life - dt
+		local move = s.Vel * dt
+		local hitPlayer
+		for _, player in ipairs(Players:GetPlayers()) do
+			local r = rootOf(player)
+			if r then
+				local rel = r.Position - s.Pos
+				local along = math.clamp(rel:Dot(move.Unit), 0, move.Magnitude)
+				if (r.Position - (s.Pos + move.Unit * along)).Magnitude < 2.6 then
+					hitPlayer = player
+				end
+			end
+		end
+		if hitPlayer then
+			Combat.damagePlayer(hitPlayer, s.Damage, s.Pos)
+			Net.fireAll("Fx", { Kind = "ShotEnd", Id = id, Pos = s.Pos })
+			shots[id] = nil
+		elseif s.Life <= 0 then
+			Net.fireAll("Fx", { Kind = "ShotEnd", Id = id, Pos = s.Pos })
+			shots[id] = nil
+		else
+			s.Pos = s.Pos + move
+		end
+	end
+end
+
 local function buildRiftVisual(pos)
 	local model = Instance.new("Model")
 	model.Name = "Rift"
@@ -302848,6 +303910,7 @@ local function buildRiftVisual(pos)
 		local p = Instance.new("Part")
 		p.Anchored = true
 		p.CanCollide = false
+		p.CanQuery = false
 		p.Material = Enum.Material.Neon
 		p.Color = i % 2 == 0 and PURPLE or Color3.fromRGB(255, 120, 220)
 		p.Size = Vector3.new(1.6, 1.6, 2.4)
@@ -302858,6 +303921,7 @@ local function buildRiftVisual(pos)
 	core.Name = "Core"
 	core.Anchored = true
 	core.CanCollide = false
+	core.CanQuery = false
 	core.Material = Enum.Material.Neon
 	core.Color = Color3.fromRGB(60, 20, 90)
 	core.Transparency = 0.3
@@ -302877,8 +303941,32 @@ local function buildRiftVisual(pos)
 	return model
 end
 
+local WAVES = {
+	{ Gremlin = 4 },
+	{ Gremlin = 3, Spitter = 2 },
+	{ Gremlin = 3, Spitter = 2, Brute = 1 },
+}
+
+function Enemies.spawnWave(center, composition, opts, spread)
+	for typeName, n in pairs(composition) do
+		for _ = 1, n do
+			Enemies.spawn(center + Vector3.new(rng:NextNumber(-spread, spread), 6, rng:NextNumber(-spread, spread)), typeName, opts)
+		end
+	end
+end
+
+function Enemies.allRiftsClosed()
+	for _, r in ipairs(rifts) do
+		if not r.Closed then
+			return false
+		end
+	end
+	return #rifts > 0
+end
+
 function Enemies.init(systems)
 	Net, PlayerState, Combat = systems.Net, systems.Players, systems.Combat
+	Progression, HeatSystem = systems.Progression, systems.Heat
 	folder = Instance.new("Folder")
 	folder.Name = "Enemies"
 	folder.Parent = workspace
@@ -302890,51 +303978,28 @@ function Enemies.start()
 			table.insert(rifts, { Name = r.Name, Pos = r.Pos, Level = levelName, Wave = 0, Closed = false, Visual = buildRiftVisual(r.Pos) })
 		end
 	end
+	Enemies.onAllRiftsClosed = Enemies.onAllRiftsClosed or function() end
 
 	local accum = 0
 	RunService.Heartbeat:Connect(function(dt)
+		stepShots(dt)
 		accum = accum + dt
-		local t = os.clock()
-		-- AI at 20 Hz.
 		if accum < 0.05 then
 			return
 		end
 		local step = accum
 		accum = 0
+		local now = os.clock()
 		for i = #list, 1, -1 do
 			local e = list[i]
 			if not e.Model.Parent or e.Health <= 0 then
 				table.remove(list, i)
+			elseif e.Think then
+				e.Think(e, now, step)
 			else
-				if e.Stun > 0 then
-					e.Stun = e.Stun - step
-					if e.Stun <= 0 then
-						e.Align.Enabled = true
-					end
-				end
-				local pos = e.Root.Position
-				local player, dist = nearestPlayer(pos)
-				local bob = math.sin(t * 3 + e.Phase) * 1.2
-				if player then
-					local target = player.Character.HumanoidRootPart.Position
-					local flat = Vector3.new(target.X - pos.X, 0, target.Z - pos.Z)
-					local goal = target + Vector3.new(0, 1 + bob, 0)
-					if flat.Magnitude > 0.1 then
-						e.Orient.CFrame = CFrame.lookAt(Vector3.zero, flat.Unit)
-					end
-					e.Align.Position = goal
-					if dist < Config.Enemy.ContactRange + 2 and t > e.AttackAt then
-						e.AttackAt = t + Config.Enemy.AttackCooldown
-						if Combat then
-							Combat.damagePlayer(player, Config.Enemy.ContactDamage)
-						end
-					end
-				else
-					e.Align.Position = e.Home + Vector3.new(math.cos(t * 0.5 + e.Phase) * 6, 2 + bob, math.sin(t * 0.5 + e.Phase) * 6)
-				end
+				think(e, now, step)
 			end
 		end
-		-- Rift patrols.
 		for index, rift in ipairs(rifts) do
 			if not rift.Closed then
 				if rift.Wave == 0 then
@@ -302942,42 +304007,38 @@ function Enemies.start()
 					if player and dist < 80 then
 						rift.Wave = 1
 						Net.fireAll("Notify", { Text = "A dimensional rift opens! Wave 1/3", Color = PURPLE })
-						for _ = 1, 4 do
-							Enemies.spawn(rift.Pos + Vector3.new(rng:NextNumber(-25, 25), 6, rng:NextNumber(-25, 25)), index)
-						end
+						Enemies.spawnWave(rift.Pos, WAVES[1], { Rift = index }, 25)
 					end
-				else
-					local alive = 0
-					for _, e in ipairs(list) do
-						if e.Rift == index and e.Health > 0 then
-							alive = alive + 1
-						end
-					end
-					if alive == 0 then
-						if rift.Wave >= 3 then
-							rift.Closed = true
-							rift.Visual:Destroy()
-							Net.fireAll("Notify", { Banner = "RIFT CLOSED!", Text = rift.Name:gsub("_", " ") .. " is safe again" })
-							for _, st in pairs(PlayerState.all()) do
-								PlayerState.addMeter(st, 25)
-							end
-						else
-							rift.Wave = rift.Wave + 1
-							Net.fireAll("Notify", { Text = "Wave " .. rift.Wave .. "/3", Color = PURPLE })
-							for _ = 1, 3 + rift.Wave * 2 do
-								Enemies.spawn(rift.Pos + Vector3.new(rng:NextNumber(-30, 30), 6, rng:NextNumber(-30, 30)), index)
+				elseif Enemies.count(function(e)
+					return e.Rift == index
+				end) == 0 then
+					if rift.Wave >= 3 then
+						rift.Closed = true
+						rift.Visual:Destroy()
+						Net.fireAll("Notify", { Banner = "RIFT CLOSED!", Text = rift.Name:gsub("_", " ") .. " is safe again" })
+						for player, st in pairs(PlayerState.all()) do
+							PlayerState.addMeter(st, 25)
+							local root = rootOf(player)
+							if Progression and root and (root.Position - rift.Pos).Magnitude < 250 then
+								Progression.award(player, 120, 60, "Rift closed")
 							end
 						end
+						if Enemies.allRiftsClosed() then
+							Enemies.onAllRiftsClosed()
+						end
+					else
+						rift.Wave = rift.Wave + 1
+						Net.fireAll("Notify", { Text = "Wave " .. rift.Wave .. "/3", Color = PURPLE })
+						Enemies.spawnWave(rift.Pos, WAVES[rift.Wave], { Rift = index }, 30)
 					end
 				end
 			end
 		end
 	end)
 
-	-- Reopen closed rifts after a while so the world stays lively.
 	task.spawn(function()
 		while true do
-			task.wait(120)
+			task.wait(150)
 			for _, rift in ipairs(rifts) do
 				if rift.Closed then
 					rift.Closed = false
@@ -302989,11 +304050,128 @@ function Enemies.start()
 	end)
 end
 
+function Enemies.rifts()
+	return rifts
+end
+
 return Enemies
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18825"><Properties>
+<Item class="ModuleScript" referent="RBX18828"><Properties>
+<string name="Name">Heat</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Wanted level, open-world-crime-game style but for superheroes: the more rift
+-- monsters you smash in Retroville, the more "threat stars" you collect.
+-- While you have stars, Hunter squads are dispatched after you; keep fighting
+-- and it escalates, break away (no combat, no hunters near) and the stars
+-- cool off one by one. Shown on the HUD as flashing stars while cooling.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local HeatRules = require(Shared:WaitForChild("Heat"))
+
+local HeatSystem = {}
+local Net, PlayerState, Enemies
+local heat = {} -- [player] = Heat
+
+local function heatOf(player)
+	local h = heat[player]
+	if not h then
+		h = HeatRules.new(Config)
+		heat[player] = h
+	end
+	return h
+end
+
+local function inRetroville(player)
+	local st = PlayerState.get(player)
+	return st and st.Level == Config.Levels.Retroville
+end
+
+function HeatSystem.addChaos(player, amount)
+	if not inRetroville(player) then
+		return
+	end
+	local h = heatOf(player)
+	local before = h:Stars()
+	h:AddChaos(amount, os.clock())
+	if h:Stars() > before then
+		Net.fire("Notify", player, { Text = ("Threat level %d! Hunters are coming for you"):format(h:Stars()), Color = Color3.fromRGB(255, 120, 90), Time = 2.5 })
+	end
+end
+
+function HeatSystem.clear(player)
+	heat[player] = nil
+	player:SetAttribute("Heat", 0)
+	player:SetAttribute("HeatCooling", false)
+end
+
+local function huntersNear(player, root)
+	for _, e in ipairs(Enemies.list()) do
+		if e.HuntFor == player and e.Health > 0 and e.Model.Parent and (e.Root.Position - root.Position).Magnitude < Config.Heat.NearRange then
+			return true
+		end
+	end
+	return false
+end
+
+local function dispatch(player, root, count)
+	for i = 1, count do
+		local a = (i / count) * math.pi * 2 + math.random() * 0.5
+		local pos = root.Position + Vector3.new(math.cos(a) * 75, 10, math.sin(a) * 75)
+		Enemies.spawn(pos, "Hunter", { HuntFor = player })
+	end
+end
+
+function HeatSystem.init(systems)
+	Net, PlayerState, Enemies = systems.Net, systems.Players, systems.Enemies
+end
+
+function HeatSystem.start()
+	Players.PlayerRemoving:Connect(function(player)
+		heat[player] = nil
+	end)
+	local accum = 0
+	RunService.Heartbeat:Connect(function(dt)
+		accum = accum + dt
+		if accum < 0.25 then
+			return
+		end
+		local step = accum
+		accum = 0
+		local now = os.clock()
+		for player, h in pairs(heat) do
+			local character = player.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if not inRetroville(player) or not root or not humanoid or humanoid.Health <= 0 then
+				-- Leaving the world or getting KO'd clears your threat.
+				if h.Value > 0 then
+					HeatSystem.clear(player)
+				end
+			else
+				local near = huntersNear(player, root)
+				local spawnCount = h:Tick(step, now, near)
+				if spawnCount > 0 then
+					dispatch(player, root, spawnCount)
+				end
+				player:SetAttribute("Heat", h.Value)
+				player:SetAttribute("HeatCooling", h:Cooling(now, near))
+			end
+		end
+	end)
+end
+
+return HeatSystem
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18829"><Properties>
 <string name="Name">Heroes</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Hero selection, looks and stats, Ben's Omnitrix, and replication of each
@@ -303017,6 +304195,7 @@ local STATE_KEYS = {
 	Flying = "boolean", Gliding = "boolean", Dodge = "boolean", DodgeAir = "boolean", Pounding = "boolean",
 	Emote = "boolean", WallSlide = "boolean", Boosting = "boolean", Jetpack = "boolean", Scooter = "boolean",
 	Intangible = "boolean", Takeoff = "boolean", Grapple = "boolean", Breath = "boolean",
+	Slide = "boolean", WallRun = "boolean", Climb = "boolean", Swing = "boolean", WallSide = "number", Lunge = "boolean",
 	DodgeSide = "number", FlyBank = "number", FlyPitch = "number",
 }
 
@@ -303243,7 +304422,320 @@ return Heroes
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18826"><Properties>
+<Item class="ModuleScript" referent="RBX18830"><Properties>
+<string name="Name">Missions</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Open-world missions: glowing markers around Retroville. Walk up and press E
+-- to start; each has an objective, a waypoint and a timer, and pays XP and
+-- cash. Completions are saved.
+--   Rift Rush        clear three waves at Downtown before time runs out
+--   Express Delivery hop in the delivery hover car, rush it to the Neutron house
+--   Rooftop Run      reach the tower-top checkpoints by any means
+--   Titan Hunt       summon and defeat the Rift Titan
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local MapData = require(Shared:WaitForChild("MapData"))
+
+local Missions = {}
+local Net, PlayerState, Enemies, World, Boss, Progression, Profiles
+local active = {} -- [player] = mission run
+
+local DEFS = {
+	{ Id = "RiftRush", Name = "Rift Rush", Time = 150, Xp = 250, Cash = 150, Anchor = "Downtown", Blurb = "Clear three waves of rift monsters" },
+	{ Id = "Delivery", Name = "Express Delivery", Time = 75, Xp = 200, Cash = 180, Anchor = "School", Blurb = "Rush the delivery hover car to the Neutron house" },
+	{ Id = "Rooftop", Name = "Rooftop Run", Time = 110, Xp = 220, Cash = 140, Anchor = "TowerBase", Blurb = "Hit every tower-top checkpoint" },
+	{ Id = "Titan", Name = "Titan Hunt", Time = 300, Xp = 300, Cash = 200, Anchor = "Plaza", Blurb = "Bring down the Rift Titan" },
+}
+
+local function rootOf(player)
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		return character:FindFirstChild("HumanoidRootPart"), humanoid
+	end
+	return nil
+end
+
+local function objective(player, run, text, pos)
+	run.Text = text
+	run.Waypoint = pos
+	Net.fire("Objective", player, { Id = run.Def.Id, Name = run.Def.Name, Text = text, Pos = pos, Ends = run.EndsServer })
+end
+
+local function finish(player, success, reason)
+	local run = active[player]
+	if not run then
+		return
+	end
+	active[player] = nil
+	if run.Cleanup then
+		run.Cleanup()
+	end
+	Net.fire("Objective", player, { Clear = true })
+	if success then
+		Net.fire("Notify", player, { Banner = "MISSION PASSED", Text = run.Def.Name, Color = Color3.fromRGB(255, 220, 90) })
+		Progression.award(player, run.Def.Xp, run.Def.Cash, run.Def.Name)
+		local data = Profiles.get(player)
+		if data then
+			data.Missions[run.Def.Id] = (data.Missions[run.Def.Id] or 0) + 1
+		end
+	else
+		Net.fire("Notify", player, { Banner = "MISSION FAILED", Text = reason or run.Def.Name, Color = Color3.fromRGB(255, 110, 100) })
+	end
+end
+
+local STARTERS = {}
+
+STARTERS.RiftRush = function(player, run, anchor)
+	run.Tag = "Mission_" .. player.UserId
+	run.Wave = 1
+	local waves = { { Gremlin = 4, Spitter = 1 }, { Gremlin = 4, Spitter = 2 }, { Gremlin = 3, Spitter = 2, Brute = 1 } }
+	Enemies.spawnWave(anchor, waves[1], { Mission = run.Tag }, 25)
+	objective(player, run, "Clear the rift monsters: wave 1/3", anchor)
+	run.Tick = function()
+		local alive = Enemies.count(function(e)
+			return e.Mission == run.Tag
+		end)
+		if alive == 0 then
+			if run.Wave >= 3 then
+				finish(player, true)
+			else
+				run.Wave = run.Wave + 1
+				Enemies.spawnWave(anchor, waves[run.Wave], { Mission = run.Tag }, 30)
+				objective(player, run, "Clear the rift monsters: wave " .. run.Wave .. "/3", anchor)
+			end
+		end
+	end
+	run.Cleanup = function()
+		for _, e in ipairs(Enemies.list()) do
+			if e.Mission == run.Tag and e.Model.Parent then
+				e.Model:Destroy()
+			end
+		end
+	end
+end
+
+STARTERS.Delivery = function(player, run, anchor)
+	local dest = MapData.Anchors.NeutronHouse
+	local car = World.buildHoverCar(anchor + Vector3.new(14, 0, 0), 0, Color3.fromRGB(250, 200, 40))
+	run.Car = car
+	objective(player, run, "Get in the delivery hover car", car.PrimaryPart.Position)
+	run.Tick = function()
+		if not car.Parent then
+			finish(player, false, "The delivery car was lost")
+			return
+		end
+		local _, humanoid = rootOf(player)
+		local seat = humanoid and humanoid.SeatPart
+		local inCar = seat and seat:IsDescendantOf(car)
+		if inCar and run.Text ~= "Deliver the package!" then
+			objective(player, run, "Deliver the package!", dest)
+		elseif not inCar and run.Text == "Deliver the package!" then
+			objective(player, run, "Get back in the delivery hover car", car.PrimaryPart.Position)
+		end
+		if inCar and (car.PrimaryPart.Position - dest).Magnitude < 30 then
+			finish(player, true)
+		end
+	end
+	run.Cleanup = function()
+		task.delay(8, function()
+			if car.Parent then
+				car:Destroy()
+			end
+		end)
+	end
+end
+
+STARTERS.Rooftop = function(player, run)
+	local points = MapData.Anchors.Towers
+	run.Index = 1
+	local rings = {}
+	for i, p in ipairs(points) do
+		local ring = Instance.new("Part")
+		ring.Name = "Checkpoint"
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.CanQuery = false
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Material = Enum.Material.Neon
+		ring.Color = i == 1 and Color3.fromRGB(255, 220, 60) or Color3.fromRGB(120, 255, 210)
+		ring.Transparency = 0.45
+		ring.Size = Vector3.new(0.6, 16, 16)
+		ring.CFrame = CFrame.new(p + Vector3.new(0, 4, 0)) * CFrame.Angles(0, 0, math.pi / 2)
+		ring.Parent = workspace
+		rings[i] = ring
+	end
+	objective(player, run, "Checkpoint 1/" .. #points, points[1])
+	run.Tick = function()
+		local root = rootOf(player)
+		local p = points[run.Index]
+		if root and p and (root.Position - (p + Vector3.new(0, 4, 0))).Magnitude < 12 then
+			rings[run.Index]:Destroy()
+			Net.fire("Fx", player, { Kind = "Burst", Pos = p, Color = Color3.fromRGB(255, 220, 60), Count = 30 })
+			run.Index = run.Index + 1
+			if run.Index > #points then
+				finish(player, true)
+			else
+				rings[run.Index].Color = Color3.fromRGB(255, 220, 60)
+				objective(player, run, ("Checkpoint %d/%d"):format(run.Index, #points), points[run.Index])
+			end
+		end
+	end
+	run.Cleanup = function()
+		for _, ring in pairs(rings) do
+			if ring.Parent then
+				ring:Destroy()
+			end
+		end
+	end
+end
+
+STARTERS.Titan = function(player, run, anchor)
+	local done = false
+	local boss = Boss.spawn(anchor, function()
+		done = true
+	end)
+	objective(player, run, "Defeat the " .. Config.Boss.Name, boss and boss.Root.Position or anchor)
+	run.Tick = function()
+		local current = Boss.active()
+		if done or not current then
+			finish(player, true)
+		elseif current.Root.Parent then
+			run.Waypoint = current.Root.Position
+		end
+	end
+	run.AllowDeath = true
+end
+
+local function start(player, def)
+	if active[player] then
+		Net.fire("Notify", player, { Text = "Finish your current mission first", Time = 2 })
+		return
+	end
+	local st = PlayerState.get(player)
+	if not st or st.Level ~= Config.Levels.Retroville then
+		return
+	end
+	local anchor = MapData.Anchors[def.Anchor]
+	local run = { Def = def, Ends = os.clock() + def.Time, EndsServer = workspace:GetServerTimeNow() + def.Time }
+	active[player] = run
+	Net.fire("Notify", player, { Banner = string.upper(def.Name), Text = def.Blurb, Color = Color3.fromRGB(255, 220, 90) })
+	STARTERS[def.Id](player, run, anchor)
+end
+
+local function buildMarker(def)
+	local pos = MapData.Anchors[def.Anchor]
+	if not pos then
+		return
+	end
+	local ground = Enemies.groundAt(pos)
+	local marker = Instance.new("Part")
+	marker.Name = "MissionMarker_" .. def.Id
+	marker.Anchored = true
+	marker.CanCollide = false
+	marker.CanQuery = false
+	marker.Shape = Enum.PartType.Cylinder
+	marker.Material = Enum.Material.Neon
+	marker.Color = Color3.fromRGB(255, 210, 60)
+	marker.Transparency = 0.4
+	marker.Size = Vector3.new(0.4, 8, 8)
+	marker.CFrame = CFrame.new(ground + Vector3.new(0, 0.3, 0)) * CFrame.Angles(0, 0, math.pi / 2)
+	marker:SetAttribute("Mission", def.Name)
+	marker.Parent = workspace:FindFirstChild("Interactables") or workspace
+	local beam = Instance.new("Part")
+	beam.Anchored = true
+	beam.CanCollide = false
+	beam.CanQuery = false
+	beam.Material = Enum.Material.Neon
+	beam.Color = Color3.fromRGB(255, 210, 60)
+	beam.Transparency = 0.7
+	beam.Size = Vector3.new(1.5, 80, 1.5)
+	beam.CFrame = CFrame.new(ground + Vector3.new(0, 40, 0))
+	beam.Parent = marker
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Start mission"
+	prompt.ObjectText = def.Name
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0.4
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = marker
+	prompt.Triggered:Connect(function(player)
+		start(player, def)
+	end)
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(240, 50)
+	gui.StudsOffset = Vector3.new(0, 9, 0)
+	gui.MaxDistance = 300
+	gui.Parent = marker
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(255, 220, 90)
+	label.TextStrokeTransparency = 0.2
+	label.Text = "★ " .. def.Name
+	label.Parent = gui
+end
+
+function Missions.init(systems)
+	Net, PlayerState, Enemies, World, Boss = systems.Net, systems.Players, systems.Enemies, systems.World, systems.Boss
+	Progression, Profiles = systems.Progression, systems.Profiles
+end
+
+function Missions.start()
+	if not MapData.Anchors then
+		return
+	end
+	for _, def in ipairs(DEFS) do
+		buildMarker(def)
+	end
+	Players.PlayerRemoving:Connect(function(player)
+		local run = active[player]
+		if run and run.Cleanup then
+			run.Cleanup()
+		end
+		active[player] = nil
+	end)
+	local accum = 0
+	RunService.Heartbeat:Connect(function(dt)
+		accum = accum + dt
+		if accum < 0.2 then
+			return
+		end
+		accum = 0
+		local now = os.clock()
+		for player, run in pairs(active) do
+			local root = rootOf(player)
+			local st = PlayerState.get(player)
+			if not run.AllowDeath and not root then
+				finish(player, false, "You were knocked out")
+			elseif st and st.Level ~= Config.Levels.Retroville then
+				finish(player, false, "You left Retroville")
+			elseif now > run.Ends then
+				finish(player, false, "Out of time")
+			elseif run.Tick then
+				local ok, err = pcall(run.Tick)
+				if not ok then
+					warn("[Missions] " .. tostring(err))
+					finish(player, false)
+				end
+			end
+		end
+	end)
+end
+
+return Missions
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18831"><Properties>
 <string name="Name">Net</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Creates every remote from Shared/Remotes and wraps client->server handlers
@@ -303341,7 +304833,7 @@ return Net
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18827"><Properties>
+<Item class="ModuleScript" referent="RBX18832"><Properties>
 <string name="Name">Players</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Per-player authoritative state: chosen hero, Omnitrix, ultimate meter,
@@ -303374,6 +304866,10 @@ function PlayerState.new(player)
 		Kills = 0,
 		Shards = 0,
 		RegenAt = 0,
+		Combo = 0,
+		ComboAt = 0,
+		DamageMul = 1,
+		MeterMul = 1,
 	}
 end
 
@@ -303433,7 +304929,617 @@ return PlayerState
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18828"><Properties>
+<Item class="ModuleScript" referent="RBX18833"><Properties>
+<string name="Name">Profiles</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Saved player progress: level, XP, skill points and ranks, cash, collected
+-- rift shards, course best times, missions completed.
+--
+-- One DataStore key per player, read-modify-write with UpdateAsync only, a
+-- session lock so two servers never own the same profile (no dupes or
+-- rollbacks when someone hops servers), retries with backoff, staggered
+-- autosaves, and a final save on leave and on shutdown (BindToClose).
+-- If a live server can't load someone's data they are kicked rather than
+-- given a blank profile that would overwrite their real save. In Studio
+-- without API access the game still runs with an unsaved profile.
+
+local Players = game:GetService("Players")
+local DataStoreService = game:GetService("DataStoreService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+
+local Profiles = {}
+local STORE_NAME = "MultiverseToonsProfiles_v1"
+local VERSION = 1
+local AUTOSAVE = 60
+local LOCK_STALE = AUTOSAVE * 2.5
+
+local store
+local profiles = {}   -- [player] = { Data = table, Saving = bool, NoSave = bool }
+local loadedCallbacks = {}
+local jobId = game.JobId ~= "" and game.JobId or ("studio-" .. HttpService:GenerateGUID(false))
+
+local function defaultProfile()
+	return {
+		version = VERSION,
+		Level = 1, Xp = 0, SkillPoints = 0, Skills = {}, Cash = 0, SkillPointsBought = 0,
+		Shards = {},       -- array of shard ids
+		Best = {},         -- course name -> seconds
+		Missions = {},     -- mission id -> times completed
+	}
+end
+
+local MIGRATIONS = {
+	-- [1] = function(data) ... return data end,
+}
+
+local function migrate(data)
+	data.version = data.version or 1
+	while data.version < VERSION do
+		local step = MIGRATIONS[data.version]
+		if not step then
+			error("missing migration from v" .. tostring(data.version))
+		end
+		data = step(data)
+		data.version = data.version + 1
+	end
+	-- Fill fields added since (defensive; keeps old saves valid).
+	for k, v in pairs(defaultProfile()) do
+		if data[k] == nil then
+			data[k] = v
+		end
+	end
+	return data
+end
+
+local function withRetry(attempts, fn)
+	local wait = 1
+	for attempt = 1, attempts do
+		local ok, a, b = pcall(fn)
+		if ok then
+			return true, a, b
+		end
+		warn(("[Profiles] attempt %d/%d failed: %s"):format(attempt, attempts, tostring(a)))
+		if attempt < attempts then
+			task.wait(wait)
+			wait = math.min(wait * 2, 16)
+		end
+	end
+	return false
+end
+
+local function key(player)
+	return "u" .. player.UserId
+end
+
+-- Claim the lock and load. Returns data, or nil + reason ("locked" / "error").
+local function claim(player)
+	local result, reason
+	local ok = withRetry(4, function()
+		result, reason = nil, nil
+		store:UpdateAsync(key(player), function(stored)
+			local now = os.time()
+			if stored and stored.lock and stored.lock.job ~= jobId and now - (stored.lock.time or 0) < LOCK_STALE then
+				reason = "locked"
+				return nil -- abort: another server owns this profile
+			end
+			local data = migrate(stored and stored.data or defaultProfile())
+			result = data
+			return { data = data, lock = { job = jobId, time = now } }
+		end)
+	end)
+	if not ok then
+		return nil, "error"
+	end
+	return result, reason
+end
+
+local function save(player, release)
+	local entry = profiles[player]
+	if not entry or entry.NoSave or not store then
+		return true
+	end
+	local snapshot = HttpService:JSONDecode(HttpService:JSONEncode(entry.Data)) -- detach + validate JSON-safe
+	return withRetry(release and 5 or 3, function()
+		store:UpdateAsync(key(player), function(stored)
+			if stored and stored.lock and stored.lock.job ~= jobId then
+				return nil -- we lost the lock; never overwrite the new owner's data
+			end
+			return { data = snapshot, lock = (not release) and { job = jobId, time = os.time() } or nil }
+		end)
+	end)
+end
+
+local function setAttributes(player, data)
+	player:SetAttribute("Level", data.Level)
+	player:SetAttribute("Xp", data.Xp)
+	player:SetAttribute("Cash", data.Cash)
+	player:SetAttribute("SkillPoints", data.SkillPoints)
+	for name, rank in pairs(data.Skills) do
+		player:SetAttribute("Skill_" .. name, rank)
+	end
+end
+
+local function onPlayerAdded(player)
+	local data, reason
+	if store then
+		for _ = 1, 5 do
+			data, reason = claim(player)
+			if data or reason ~= "locked" then
+				break
+			end
+			task.wait(4) -- the previous server may still be releasing it
+		end
+	end
+	if not player.Parent then
+		return
+	end
+	local entry
+	if data then
+		entry = { Data = data }
+	elseif not store or RunService:IsStudio() then
+		entry = { Data = defaultProfile(), NoSave = true }
+		if store then
+			warn("[Profiles] couldn't load data in Studio; using an unsaved profile")
+		end
+	else
+		player:Kick(reason == "locked" and "Your progress is still saving from another server. Please rejoin in a moment."
+			or "Your progress couldn't load right now. Please rejoin.")
+		return
+	end
+	profiles[player] = entry
+	setAttributes(player, entry.Data)
+	player:SetAttribute("ProfileLoaded", true)
+	for _, fn in ipairs(loadedCallbacks) do
+		task.spawn(fn, player, entry.Data)
+	end
+	-- Staggered autosave.
+	task.spawn(function()
+		task.wait((player.UserId % AUTOSAVE) + 5)
+		while profiles[player] == entry do
+			save(player, false)
+			task.wait(AUTOSAVE)
+		end
+	end)
+end
+
+function Profiles.get(player)
+	local entry = profiles[player]
+	return entry and entry.Data
+end
+
+-- fn(player, data) runs when a player's profile is ready (also for players already loaded).
+function Profiles.onLoaded(fn)
+	table.insert(loadedCallbacks, fn)
+	for player, entry in pairs(profiles) do
+		task.spawn(fn, player, entry.Data)
+	end
+end
+
+function Profiles.sync(player)
+	local data = Profiles.get(player)
+	if data then
+		setAttributes(player, data)
+	end
+end
+
+function Profiles.init()
+	local ok, result = pcall(function()
+		return DataStoreService:GetDataStore(STORE_NAME)
+	end)
+	store = ok and result or nil
+	if not store then
+		warn("[Profiles] DataStores unavailable (unpublished place or API access off); progress won't save")
+	end
+end
+
+function Profiles.start()
+	Players.PlayerAdded:Connect(onPlayerAdded)
+	for _, player in ipairs(Players:GetPlayers()) do
+		task.spawn(onPlayerAdded, player)
+	end
+	Players.PlayerRemoving:Connect(function(player)
+		if profiles[player] then
+			save(player, true)
+			profiles[player] = nil
+		end
+	end)
+	game:BindToClose(function()
+		if RunService:IsStudio() and not store then
+			return
+		end
+		local pending = 0
+		for player in pairs(profiles) do
+			pending = pending + 1
+			task.spawn(function()
+				save(player, true)
+				pending = pending - 1
+			end)
+		end
+		local deadline = os.clock() + 25
+		while pending > 0 and os.clock() < deadline do
+			task.wait(0.2)
+		end
+	end)
+end
+
+return Profiles
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18834"><Properties>
+<string name="Name">Progression</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Rewards and growth: XP and cash for kills, missions, courses and shards;
+-- level-ups grant skill points; skills (Vitality, Power, Reserves, Aero,
+-- Agility, Focus) apply to the hero; the Gear Locker in the Nexus sells
+-- health packs, ultimate charge and extra skill points. All server-side;
+-- the client only asks.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local MapData = require(Shared:WaitForChild("MapData"))
+local Rules = require(Shared:WaitForChild("Progression"))
+
+local Progression = {}
+local Net, Profiles, PlayerState
+
+function Progression.effects(player)
+	local data = Profiles.get(player)
+	return Rules.effects(data and data.Skills)
+end
+
+-- Apply skill effects that live on the character (max health).
+function Progression.applyToCharacter(player)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	local fx = Progression.effects(player)
+	local st = PlayerState.get(player)
+	if st then
+		st.DamageMul = fx.Damage
+		st.MeterMul = fx.Meter
+	end
+	local max = Config.Player.MaxHealth + fx.MaxHealth
+	local frac = humanoid.Health / math.max(1, humanoid.MaxHealth)
+	humanoid.MaxHealth = max
+	humanoid.Health = math.clamp(frac * max, 1, max)
+end
+
+function Progression.award(player, xp, cash, reason)
+	local data = Profiles.get(player)
+	if not data then
+		return
+	end
+	data.Cash = data.Cash + math.max(0, math.floor(cash or 0))
+	local levels = Rules.addXp(data, xp or 0, Config)
+	Profiles.sync(player)
+	if (xp or 0) > 0 or (cash or 0) > 0 then
+		Net.fire("Fx", player, { Kind = "Reward", Xp = math.floor(xp or 0), Cash = math.floor(cash or 0), Reason = reason })
+	end
+	if levels > 0 then
+		Net.fire("Notify", player, { Banner = "LEVEL UP! Level " .. data.Level, Text = "+" .. levels .. " skill point" .. (levels > 1 and "s" or "") .. " - press K to spend", Color = Color3.fromRGB(255, 220, 90) })
+		Net.fireAll("Fx", { Kind = "Burst", Pos = player.Character and player.Character:GetPivot().Position, Color = Color3.fromRGB(255, 220, 90), Count = 50 })
+		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.Health = humanoid.MaxHealth
+		end
+	end
+end
+
+local function near(player, pos, range)
+	local character = player.Character
+	return character and pos and (character:GetPivot().Position - pos).Magnitude < range
+end
+
+local function onSkill(player, skill)
+	local data = Profiles.get(player)
+	if not data or type(skill) ~= "string" then
+		return
+	end
+	if Rules.buySkill(data, skill, Config) then
+		Profiles.sync(player)
+		Progression.applyToCharacter(player)
+		Net.fire("Notify", player, { Text = Config.Skills[skill].Name .. " rank " .. data.Skills[skill], Color = Color3.fromRGB(255, 220, 90), Time = 2 })
+	end
+end
+
+local function onShop(player, itemId)
+	local data = Profiles.get(player)
+	local st = PlayerState.get(player)
+	if not data or not st or type(itemId) ~= "string" then
+		return
+	end
+	local services = MapData.Services or {}
+	if not near(player, services.GearLocker, 30) then
+		Net.fire("Notify", player, { Text = "Visit the Gear Locker in the Nexus to shop", Time = 2 })
+		return
+	end
+	local item
+	for _, it in ipairs(Config.Shop) do
+		if it.Id == itemId then
+			item = it
+		end
+	end
+	if not item then
+		return
+	end
+	local price = item.Price
+	if item.Id == "SkillPoint" then
+		price = Rules.skillPointPrice(data.SkillPointsBought, Config)
+	end
+	if data.Cash < price then
+		Net.fire("Notify", player, { Text = "Not enough cash ($" .. price .. ")", Color = Color3.fromRGB(255, 140, 120), Time = 2 })
+		return
+	end
+	data.Cash = data.Cash - price
+	if item.Id == "Medkit" then
+		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.Health = math.min(humanoid.MaxHealth, humanoid.Health + 60)
+		end
+	elseif item.Id == "Charge" then
+		PlayerState.addMeter(st, 50)
+	elseif item.Id == "SkillPoint" then
+		data.SkillPoints = data.SkillPoints + 1
+		data.SkillPointsBought = data.SkillPointsBought + 1
+	end
+	Profiles.sync(player)
+	Net.fire("Notify", player, { Text = "Bought " .. item.Name, Color = Color3.fromRGB(140, 255, 160), Time = 2 })
+	Net.fire("OpenShop", player, { Prices = Progression.prices(player) })
+end
+
+function Progression.prices(player)
+	local data = Profiles.get(player)
+	local prices = {}
+	for _, it in ipairs(Config.Shop) do
+		prices[it.Id] = it.Id == "SkillPoint" and Rules.skillPointPrice(data and data.SkillPointsBought or 0, Config) or it.Price
+	end
+	return prices
+end
+
+local function servicePrompt(pos, action, object, onTrigger)
+	if not pos then
+		return
+	end
+	local anchor = Instance.new("Part")
+	anchor.Name = "ServicePrompt_" .. object
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.Transparency = 1
+	anchor.Size = Vector3.new(4, 4, 4)
+	anchor.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+	anchor.Parent = workspace:FindFirstChild("Interactables") or workspace
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = action
+	prompt.ObjectText = object
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 18
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = anchor
+	prompt.Triggered:Connect(onTrigger)
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(200, 40)
+	gui.StudsOffset = Vector3.new(0, 7, 0)
+	gui.MaxDistance = 200
+	gui.Parent = anchor
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(255, 230, 120)
+	label.TextStrokeTransparency = 0.2
+	label.Text = object
+	label.Parent = gui
+end
+
+function Progression.init(systems)
+	Net, Profiles, PlayerState = systems.Net, systems.Profiles, systems.Players
+	Net.on("Skill", 5, onSkill)
+	Net.on("Shop", 4, onShop)
+end
+
+function Progression.start()
+	local services = MapData.Services or {}
+	servicePrompt(services.GearLocker, "Shop", "Gear Locker", function(player)
+		Net.fire("OpenShop", player, { Prices = Progression.prices(player) })
+	end)
+	servicePrompt(services.UpgradeBench, "Skills", "Upgrade Bench", function(player)
+		Net.fire("OpenShop", player, { Skills = true })
+	end)
+	Profiles.onLoaded(function(player)
+		Progression.applyToCharacter(player)
+	end)
+	local function hook(player)
+		player.CharacterAdded:Connect(function()
+			task.wait(0.5)
+			Progression.applyToCharacter(player)
+		end)
+	end
+	Players.PlayerAdded:Connect(hook)
+	for _, player in ipairs(Players:GetPlayers()) do
+		hook(player)
+	end
+end
+
+return Progression
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18835"><Properties>
+<string name="Name">Traffic</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Ambient traffic: hover cars cruise Retroville's main roads, stop for
+-- people in the way, and turn around at the end of the road. Any of them can
+-- be hijacked: walk up and press E to drive it.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local MapData = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MapData"))
+
+local Traffic = {}
+local World, Enemies
+local cars = {}
+local COUNT = 12
+local SPEED = 38
+local COLORS = {
+	Color3.fromRGB(60, 140, 230), Color3.fromRGB(250, 200, 40), Color3.fromRGB(80, 200, 120), Color3.fromRGB(240, 240, 245),
+	Color3.fromRGB(240, 120, 40), Color3.fromRGB(160, 90, 220), Color3.fromRGB(40, 40, 50),
+}
+
+local function laneFor(road, dirSign)
+	-- Drive on the right: offset from the centre line by a quarter of the road width.
+	local axis = road.Axis == "X" and Vector3.new(1, 0, 0) or Vector3.new(0, 0, 1)
+	local right = Vector3.new(-axis.Z, 0, axis.X) * dirSign
+	return axis * dirSign, road.C + right * road.W * 0.25
+end
+
+local function spawnCar(road, index)
+	local dirSign = index % 2 == 0 and 1 or -1
+	local dir, laneCenter = laneFor(road, dirSign)
+	local along = (math.random() - 0.5) * road.L * 0.8
+	local pos = laneCenter + dir * along
+	local yaw = math.deg(math.atan2(-dir.X, -dir.Z))
+	local model = World.buildHoverCar(pos, yaw, COLORS[(index % #COLORS) + 1])
+	model.Name = "TrafficCar"
+	local body = model.PrimaryPart
+	local car = {
+		Model = model, Body = body, Seat = model:FindFirstChild("DriverSeat"), Road = road, Sign = dirSign,
+		Velocity = body:FindFirstChild("DriveVelocity"), Orientation = body:FindFirstChild("DriveOrientation"), AI = true,
+	}
+	table.insert(cars, car)
+	return car
+end
+
+local function blocked(car, dir)
+	local pos = car.Body.Position
+	for _, player in ipairs(Players:GetPlayers()) do
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root then
+			local rel = root.Position - pos
+			local ahead = rel:Dot(dir)
+			if ahead > 0 and ahead < 16 and (rel - dir * ahead).Magnitude < 5 then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function drive(car, dt)
+	if car.Seat and car.Seat.Occupant then
+		car.AI = false -- hijacked: it's the driver's car now
+		return
+	end
+	if not car.AI or not car.Velocity then
+		return
+	end
+	local road = car.Road
+	local dir, laneCenter = laneFor(road, car.Sign)
+	local pos = car.Body.Position
+	-- Turn around at the end of the road.
+	local fromCenter = (pos - road.C):Dot(road.Axis == "X" and Vector3.new(1, 0, 0) or Vector3.new(0, 0, 1)) * car.Sign
+	if fromCenter > road.L * 0.47 then
+		car.Sign = -car.Sign
+		dir, laneCenter = laneFor(road, car.Sign)
+	end
+	-- Hold the lane and a hover height.
+	local toLane = laneCenter - pos
+	local lateral = toLane - dir * toLane:Dot(dir)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { car.Model, workspace:FindFirstChild("Enemies") }
+	local hit = workspace:Raycast(pos + Vector3.new(0, 4, 0), Vector3.new(0, -60, 0), params)
+	local groundY = hit and hit.Position.Y or pos.Y - 4
+	local vy = math.clamp((groundY + 4 - pos.Y) * 3, -30, 30)
+	local speed = blocked(car, dir) and 0 or SPEED
+	car.Velocity.MaxForce = 2e5
+	car.Velocity.VectorVelocity = dir * speed + Vector3.new(lateral.X, 0, lateral.Z) * 2 + Vector3.new(0, vy, 0)
+	car.Orientation.CFrame = CFrame.lookAt(Vector3.zero, dir)
+end
+
+function Traffic.init(systems)
+	World, Enemies = systems.World, systems.Enemies
+end
+
+function Traffic.start()
+	local roads = MapData.Roads or {}
+	if #roads == 0 then
+		return
+	end
+	table.sort(roads, function(a, b)
+		return a.L > b.L
+	end)
+	task.wait(3)
+	for i = 1, COUNT do
+		spawnCar(roads[((i - 1) % math.min(#roads, 8)) + 1], i)
+	end
+	local accum = 0
+	RunService.Heartbeat:Connect(function(dt)
+		accum = accum + dt
+		if accum < 0.1 then
+			return
+		end
+		accum = 0
+		for i = #cars, 1, -1 do
+			local car = cars[i]
+			if not car.Model.Parent or not car.Body.Parent then
+				table.remove(cars, i)
+			else
+				drive(car, 0.1)
+			end
+		end
+	end)
+	-- Keep the streets busy: replace cars that were taken and abandoned far away.
+	task.spawn(function()
+		while true do
+			task.wait(60)
+			local ai = 0
+			for _, car in ipairs(cars) do
+				if car.AI then
+					ai = ai + 1
+				end
+			end
+			for i = ai + 1, COUNT do
+				spawnCar(roads[math.random(1, math.min(#roads, 8))], i)
+			end
+			-- Clean up abandoned cars nobody is near.
+			for i = #cars, 1, -1 do
+				local car = cars[i]
+				if not car.AI and not (car.Seat and car.Seat.Occupant) then
+					local near = false
+					for _, player in ipairs(Players:GetPlayers()) do
+						local character = player.Character
+						if character and (character:GetPivot().Position - car.Body.Position).Magnitude < 250 then
+							near = true
+						end
+					end
+					if not near then
+						car.Model:Destroy()
+						table.remove(cars, i)
+					end
+				end
+			end
+		end
+	end)
+end
+
+return Traffic
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18836"><Properties>
 <string name="Name">World</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- The two worlds baked into Workspace by tools/build_place.py (Nexus
@@ -303541,7 +305647,7 @@ local function buildTerminal(t)
 end
 
 -- Jimmy's retro hover convertible: a seat on a hover body the driver's client flies.
-local function buildHoverCar(pos, yaw)
+function World.buildHoverCar(pos, yaw, bodyColor)
 	local model = Instance.new("Model")
 	model.Name = "HoverCar"
 	local base = CFrame.new(pos + Vector3.new(0, 3, 0)) * CFrame.Angles(0, math.rad(yaw), 0)
@@ -303560,7 +305666,7 @@ local function buildHoverCar(pos, yaw)
 		p.Parent = model
 		return p
 	end
-	local body = part("Body", Vector3.new(6.5, 1.6, 12), CFrame.new(), Color3.fromRGB(210, 40, 40))
+	local body = part("Body", Vector3.new(6.5, 1.6, 12), CFrame.new(), bodyColor or Color3.fromRGB(210, 40, 40))
 	part("Fin", Vector3.new(6.7, 0.5, 3), CFrame.new(0, 0.9, 4.5), Color3.fromRGB(240, 240, 245))
 	part("Windshield", Vector3.new(5.6, 1.4, 0.2), CFrame.new(0, 1.5, -2) * CFrame.Angles(math.rad(-20), 0, 0), Color3.fromRGB(150, 220, 255), Enum.Material.Glass).Transparency = 0.4
 	part("Grille", Vector3.new(5, 0.8, 0.3), CFrame.new(0, -0.1, -6.1), Color3.fromRGB(220, 220, 230), Enum.Material.Metal)
@@ -303637,6 +305743,7 @@ local function buildHoverCar(pos, yaw)
 			end)
 		end
 	end)
+	return model
 end
 
 function World.init(systems)
@@ -303665,13 +305772,29 @@ function World.init(systems)
 	end)
 end
 
+-- Day and night: a full day every Config.DayLengthSeconds.
+local function dayNight()
+	local Lighting = game:GetService("Lighting")
+	local start = Lighting.ClockTime
+	local t0 = os.clock()
+	while true do
+		local hours = (start + (os.clock() - t0) / Config.DayLengthSeconds * 24) % 24
+		Lighting.ClockTime = hours
+		local night = hours < 6 or hours > 19
+		Lighting.Brightness = night and 1.2 or 2.6
+		workspace:SetAttribute("Night", night)
+		task.wait(1)
+	end
+end
+
 function World.start()
+	task.spawn(dayNight)
 	for _, t in ipairs(terminals) do
 		buildTerminal(t)
 	end
 	for _, level in pairs(MapData.Levels) do
 		for _, car in ipairs(level.HoverCars) do
-			buildHoverCar(car.Pos, car.Yaw)
+			World.buildHoverCar(car.Pos, car.Yaw)
 		end
 	end
 	local function hook(player)
@@ -303695,7 +305818,7 @@ return World
 </Item>
 </Item>
 </Item>
-<Item class="StarterPlayer" referent="RBX18829"><Properties>
+<Item class="StarterPlayer" referent="RBX18837"><Properties>
 <string name="Name">StarterPlayer</string>
 <bool name="CharacterUseJumpPower">false</bool>
 <float name="CharacterJumpHeight">7.5000</float>
@@ -303705,17 +305828,17 @@ return World
 <float name="CameraMaxZoomDistance">60.0000</float>
 <token name="GameSettingsAvatar">1</token>
 </Properties>
-<Item class="StarterPlayerScripts" referent="RBX18830"><Properties>
+<Item class="StarterPlayerScripts" referent="RBX18838"><Properties>
 <string name="Name">StarterPlayerScripts</string>
 </Properties>
-<Item class="LocalScript" referent="RBX18831"><Properties>
+<Item class="LocalScript" referent="RBX18839"><Properties>
 <string name="Name">Client</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Client entry point: two-phase startup of every controller (init wires
 -- them together, start begins loops and connections).
 
 local controllers = {}
-local order = { "Input", "Hud", "CameraRig", "Movement", "Animator", "Effects", "Companions", "Vehicle" }
+local order = { "Input", "Hud", "CameraRig", "Movement", "CombatAssist", "Animator", "Effects", "Companions", "Vehicle", "Minimap" }
 for _, name in ipairs(order) do
 	local module = script:WaitForChild("Controllers"):WaitForChild(name, 10)
 	if module then
@@ -303738,10 +305861,10 @@ for _, name in ipairs(order) do
 end
 ]]></ProtectedString>
 </Properties>
-<Item class="Folder" referent="RBX18832"><Properties>
+<Item class="Folder" referent="RBX18840"><Properties>
 <string name="Name">Controllers</string>
 </Properties>
-<Item class="ModuleScript" referent="RBX18833"><Properties>
+<Item class="ModuleScript" referent="RBX18841"><Properties>
 <string name="Name">Animator</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Animates every hero in the server with Shared/Pose (the prototype's
@@ -303898,6 +306021,8 @@ local function remoteState(character, c, dt)
 		Scooter = character:GetAttribute("MvScooter"), Intangible = character:GetAttribute("MvIntangible"),
 		TakeoffTime = character:GetAttribute("MvTakeoff") and 0.3 or 0, Breath = character:GetAttribute("MvBreath"),
 		WalkPhase = c.WalkPhase, IdleTime = c.IdleTime,
+		Slide = character:GetAttribute("MvSlide"), WallRun = character:GetAttribute("MvWallRun"), WallSide = character:GetAttribute("MvWallSide") or 0,
+		Climb = character:GetAttribute("MvClimb"), Swing = character:GetAttribute("MvSwing"),
 	}
 end
 
@@ -303913,6 +306038,8 @@ local function localState(c)
 		FlipTime = S.FlipTime, WallSlide = S.WallSlide, FlyBank = S.FlyBank, FlyPitch = S.FlyPitch, Boosting = S.Boosting,
 		TakeoffTime = S.TakeoffTime, Breath = S.Breath, Jetpack = S.Jetpack > 0, Scooter = S.Scooter > 0,
 		Intangible = S.Intangible, WalkPhase = S.WalkPhase,
+		Slide = S.Slide > 0, WallRun = S.WallRun ~= nil, WallSide = S.WallRun and S.WallRun.Side or 0, Climb = S.Climb,
+		Swing = S.Swing ~= nil, Counter = S.CounterAnim, Block = S.BlockAnim, Takedown = S.TakedownAnim,
 	}
 end
 
@@ -303931,6 +306058,17 @@ local function animate(character, c, dt, now, serverNow)
 			st.AttackAnim = math.max(0, dur - (serverNow - at))
 			st.AttackDur = dur
 			st.AttackStep = character:GetAttribute("AttackStep") or 0
+		end
+	end
+	if not isLocal then
+		-- Counters and blocks come from the server's record.
+		local counterAt = character:GetAttribute("CounterAt")
+		if counterAt then
+			st.Counter = math.max(0, 0.3 - (serverNow - counterAt))
+		end
+		local blockAt = character:GetAttribute("BlockAt")
+		if blockAt then
+			st.Block = math.max(0, 0.5 - (serverNow - blockAt))
 		end
 	end
 	local hurtAt = character:GetAttribute("HurtAt")
@@ -304104,7 +306242,7 @@ return Animator
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18834"><Properties>
+<Item class="ModuleScript" referent="RBX18842"><Properties>
 <string name="Name">CameraRig</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Third-person camera like the prototype's: orbit with mouse (cursor locked),
@@ -304135,6 +306273,12 @@ function CameraRig.shake(amount)
 end
 
 -- Menus free the cursor; gameplay locks it to the centre for mouse-look.
+-- A quick zoom kick for big hits (finishers, takedowns).
+local punch = 0
+function CameraRig.punch()
+	punch = 1
+end
+
 function CameraRig.setCursorFree(free)
 	cursorFree = free
 end
@@ -304237,7 +306381,8 @@ function CameraRig.start()
 		dist = dist + (want - dist) * math.min(1, dt * 5)
 		local fovWant = 70 + (fast and 18 * math.clamp((speed - 43) / 73, 0, 1) or 0) + (state.BoostFx or 0) * 25
 		fov = fov + (fovWant - fov) * math.min(1, dt * 4)
-		camera.FieldOfView = fov
+		punch = math.max(0, punch - dt * 4)
+		camera.FieldOfView = fov - punch * 12
 
 		local rot = CFrame.Angles(0, math.rad(yaw), 0) * CFrame.Angles(math.rad(pitch), 0, 0)
 		local shoulder = seat and 0 or 1.5 * math.sqrt(scale)
@@ -304271,7 +306416,244 @@ return CameraRig
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18835"><Properties>
+<Item class="ModuleScript" referent="RBX18843"><Properties>
+<string name="Name">CombatAssist</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Freeflow combat helpers on the client:
+--  * soft targeting: the enemy nearest the crosshair is the attack target, and
+--    melee attacks lunge to it (Movement reads CombatAssist.target());
+--  * hard lock-on (Z / middle mouse / R3): the camera tracks the target;
+--  * counter prompts: when an enemy winds up an attack on you, a "!" appears
+--    over it and a COUNTER prompt flashes; press Counter (right click / X / R1)
+--    in time to reverse it, or just to block;
+--  * takedowns: at a high enough combo, T performs a special takedown.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+
+local CombatAssist = {}
+local player = Players.LocalPlayer
+local Input, CameraRig, Movement, Hud
+local current = nil   -- soft or hard target model
+local locked = nil    -- hard-locked model
+local reticle
+local threats = {}    -- [model] = expiry time (enemies winding up on me)
+
+local function alive(model)
+	if not model or not model.Parent or not model.PrimaryPart then
+		return false
+	end
+	local h = model:GetAttribute("Health")
+	return h == nil or h > 0
+end
+
+local function enemies()
+	local out = {}
+	local folder = workspace:FindFirstChild("Enemies")
+	if folder then
+		for _, m in ipairs(folder:GetChildren()) do
+			if m:IsA("Model") and m:GetAttribute("Enemy") and alive(m) then
+				table.insert(out, m)
+			end
+		end
+	end
+	return out
+end
+
+local function pick()
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return nil
+	end
+	local look = CameraRig.lookVector()
+	local best, bestScore = nil, math.huge
+	for _, m in ipairs(enemies()) do
+		local to = m.PrimaryPart.Position - root.Position
+		local d = to.Magnitude
+		if d < Config.Combat.LockRange then
+			local flat = Vector3.new(to.X, 0, to.Z)
+			local lookFlat = Vector3.new(look.X, 0, look.Z)
+			local angle = (flat.Magnitude > 0.1 and lookFlat.Magnitude > 0.1) and math.acos(math.clamp(flat.Unit:Dot(lookFlat.Unit), -1, 1)) or 0
+			-- Prefer what you're looking at, then what's close.
+			local score = angle * 40 + d
+			if angle < math.rad(70) and score < bestScore then
+				best, bestScore = m, score
+			end
+		end
+	end
+	return best
+end
+
+function CombatAssist.target()
+	if alive(locked) then
+		return locked
+	end
+	if alive(current) then
+		return current
+	end
+	return nil
+end
+
+function CombatAssist.isLocked()
+	return alive(locked)
+end
+
+local function ensureReticle()
+	if reticle then
+		return reticle
+	end
+	reticle = Instance.new("BillboardGui")
+	reticle.Name = "TargetReticle"
+	reticle.Size = UDim2.fromOffset(46, 46)
+	reticle.AlwaysOnTop = true
+	local ring = Instance.new("Frame")
+	ring.Size = UDim2.fromScale(1, 1)
+	ring.BackgroundTransparency = 1
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 3
+	stroke.Color = Color3.fromRGB(255, 230, 120)
+	stroke.Parent = ring
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.5, 0)
+	corner.Parent = ring
+	ring.Parent = reticle
+	reticle.Parent = player:WaitForChild("PlayerGui")
+	return reticle
+end
+
+-- "!" over an enemy that's about to strike.
+local function showThreat(model, time, mine, label)
+	if not model or not model.PrimaryPart then
+		return
+	end
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(60, 60)
+	gui.StudsOffset = Vector3.new(0, model.PrimaryPart.Size.Y * 0.7 + 2, 0)
+	gui.AlwaysOnTop = true
+	gui.Adornee = model.PrimaryPart
+	local text = Instance.new("TextLabel")
+	text.BackgroundTransparency = 1
+	text.Size = UDim2.fromScale(1, 1)
+	text.Font = Enum.Font.FredokaOne
+	text.TextScaled = true
+	text.Text = label and ("! " .. label) or "!"
+	text.TextColor3 = mine and Color3.fromRGB(255, 70, 70) or Color3.fromRGB(255, 200, 80)
+	text.TextStrokeTransparency = 0
+	text.Parent = gui
+	gui.Parent = player:WaitForChild("PlayerGui")
+	Debris:AddItem(gui, time + 0.1)
+	local h = Instance.new("Highlight")
+	h.FillColor = Color3.fromRGB(255, 60, 60)
+	h.FillTransparency = 0.55
+	h.OutlineColor = Color3.fromRGB(255, 220, 220)
+	h.Parent = model
+	Debris:AddItem(h, time)
+	if mine then
+		threats[model] = os.clock() + time
+	end
+end
+
+function CombatAssist.onTelegraph(fx)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local model = fx.Model
+	local mine = fx.Target == player
+	if not mine and root and model and model.PrimaryPart and (model.PrimaryPart.Position - root.Position).Magnitude < Config.Combat.CounterRange then
+		mine = true
+	end
+	showThreat(model, fx.Time or 0.6, mine, fx.Label)
+end
+
+function CombatAssist.threatened()
+	local now = os.clock()
+	for m, t in pairs(threats) do
+		if t < now or not m.Parent then
+			threats[m] = nil
+		end
+	end
+	return next(threats) ~= nil
+end
+
+function CombatAssist.takedownReady()
+	local combo = player:GetAttribute("Combo") or 0
+	local at = player:GetAttribute("ComboAt") or 0
+	return combo >= Config.Combat.TakedownCombo and workspace:GetServerTimeNow() - at < Config.Combat.ComboTimeout
+end
+
+function CombatAssist.init(controllers)
+	Input, CameraRig, Movement, Hud = controllers.Input, controllers.CameraRig, controllers.Movement, controllers.Hud
+	Input.on("LockOn", function(down)
+		if not down then
+			return
+		end
+		if alive(locked) then
+			locked = nil
+		else
+			locked = pick()
+		end
+	end)
+	Input.on("Counter", function(down)
+		if not down then
+			return
+		end
+		local S = Movement.state()
+		if CombatAssist.threatened() then
+			S.CounterAnim = 0.3
+			threats = {}
+		else
+			S.BlockAnim = Config.Combat.BlockTime
+		end
+		ReplicatedStorage.Remotes.Counter:FireServer()
+	end)
+	Input.on("Takedown", function(down)
+		if down and CombatAssist.takedownReady() then
+			Movement.state().TakedownAnim = 0.6
+			ReplicatedStorage.Remotes.Takedown:FireServer()
+		end
+	end)
+end
+
+function CombatAssist.start()
+	RunService.RenderStepped:Connect(function(dt)
+		if locked and not alive(locked) then
+			locked = nil
+		end
+		current = alive(locked) and locked or pick()
+		local r = ensureReticle()
+		r.Adornee = current and current.PrimaryPart or nil
+		r.Enabled = current ~= nil
+		local stroke = r:FindFirstChildOfClass("Frame"):FindFirstChildOfClass("UIStroke")
+		stroke.Color = alive(locked) and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(255, 230, 120)
+		stroke.Transparency = alive(locked) and 0 or 0.4
+		-- Hard lock: steer the camera toward the target.
+		if alive(locked) then
+			local character = player.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			if root then
+				local to = locked.PrimaryPart.Position - root.Position
+				local want = math.deg(math.atan2(-to.X, -to.Z))
+				local yaw = CameraRig.yaw()
+				local d = (want - yaw + 540) % 360 - 180
+				CameraRig.setYaw(yaw + d * math.min(1, dt * 8))
+			end
+		end
+		if Hud then
+			Hud.setPrompts(CombatAssist.threatened(), CombatAssist.takedownReady())
+		end
+	end)
+end
+
+return CombatAssist
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18844"><Properties>
 <string name="Name">Companions</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Sidekicks drawn on every client: Cosmo & Wanda orbit any Timmy (and ride
@@ -304458,7 +306840,7 @@ return Companions
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18836"><Properties>
+<Item class="ModuleScript" referent="RBX18845"><Properties>
 <string name="Name">Effects</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Client-side visuals for server events (Remotes "Fx"): particle bursts,
@@ -304475,7 +306857,7 @@ local Debris = game:GetService("Debris")
 
 local Effects = {}
 local player = Players.LocalPlayer
-local Hud, CameraRig, Movement
+local Hud, CameraRig, Movement, CombatAssist
 local fxFolder
 local shots = {}        -- [id] = { Part, Vel, Life }
 local takenShards = {}  -- [id] = true
@@ -304645,8 +307027,69 @@ local function onFx(fx)
 		if shard then
 			shard.Parent = nil -- hidden for this player only
 		end
-		Effects.burst(fx.Pos, Color3.fromRGB(190, 130, 255), 30)
-		Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 8, 0.4, Color3.fromRGB(120, 230, 255))
+		if not fx.Silent then
+			Effects.burst(fx.Pos, Color3.fromRGB(190, 130, 255), 30)
+			Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 8, 0.4, Color3.fromRGB(120, 230, 255))
+		end
+	elseif kind == "Telegraph" then
+		if CombatAssist then
+			CombatAssist.onTelegraph(fx)
+		end
+	elseif kind == "Stagger" then
+		local model = fx.Model
+		if model and model.Parent then
+			local h = Instance.new("Highlight")
+			h.FillColor = Color3.fromRGB(255, 220, 60)
+			h.FillTransparency = 0.4
+			h.OutlineColor = Color3.new(1, 1, 1)
+			h.Parent = model
+			Debris:AddItem(h, 2.5)
+			local gui = Instance.new("BillboardGui")
+			gui.Size = UDim2.fromOffset(160, 36)
+			gui.StudsOffset = Vector3.new(0, (model.PrimaryPart and model.PrimaryPart.Size.Y or 3) * 0.7 + 2, 0)
+			gui.AlwaysOnTop = true
+			gui.Adornee = model.PrimaryPart
+			local l = Instance.new("TextLabel")
+			l.BackgroundTransparency = 1
+			l.Size = UDim2.fromScale(1, 1)
+			l.Font = Enum.Font.FredokaOne
+			l.TextScaled = true
+			l.Text = "STAGGERED - FINISH IT!"
+			l.TextColor3 = Color3.fromRGB(255, 220, 60)
+			l.TextStrokeTransparency = 0
+			l.Parent = gui
+			gui.Parent = player:WaitForChild("PlayerGui")
+			Debris:AddItem(gui, 2.5)
+		end
+		Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 9, 0.35, Color3.fromRGB(255, 220, 60))
+	elseif kind == "Finisher" or kind == "Takedown" then
+		Effects.burst(fx.Pos, Color3.fromRGB(255, 230, 120), 50, true)
+		Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 16, 0.45, Color3.new(1, 1, 1))
+		if fx.Attacker == player or fx.Player == player then
+			CameraRig.shake(0.9)
+			if CameraRig.punch then
+				CameraRig.punch()
+			end
+		end
+	elseif kind == "Counter" then
+		Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 14, 0.3, Color3.fromRGB(120, 220, 255))
+		Effects.burst(fx.Pos + Vector3.new(0, 2, 0), Color3.fromRGB(180, 240, 255), 20)
+		if fx.Player == player then
+			CameraRig.shake(0.4)
+		end
+	elseif kind == "Block" then
+		local character = fx.Player and fx.Player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root then
+			Effects.burst(root.Position + root.CFrame.LookVector * 2, Color3.fromRGB(255, 240, 200), 8)
+		end
+	elseif kind == "Deflect" then
+		local d = fx.To - fx.From
+		local p = part({ Size = Vector3.new(0.4, 0.4, d.Magnitude), Color = Color3.fromRGB(120, 220, 255), CFrame = CFrame.lookAt(fx.From + d / 2, fx.To) })
+		TweenService:Create(p, TweenInfo.new(0.3), { Transparency = 1 }):Play()
+		Debris:AddItem(p, 0.35)
+	elseif kind == "Reward" then
+		Hud.reward(fx.Xp, fx.Cash, fx.Reason)
 	elseif kind == "Gate" then
 		if Effects.lastGate and Effects.lastGate.Parent then
 			for _, d in ipairs(Effects.lastGate:GetDescendants()) do
@@ -304752,7 +307195,7 @@ local function updateMarker()
 end
 
 function Effects.init(controllers)
-	Hud, CameraRig, Movement = controllers.Hud, controllers.CameraRig, controllers.Movement
+	Hud, CameraRig, Movement, CombatAssist = controllers.Hud, controllers.CameraRig, controllers.Movement, controllers.CombatAssist
 	Movement.onBoom = function(pos, dir)
 		Effects.ring(pos, dir, 10, 0.45, Color3.fromRGB(235, 245, 255))
 	end
@@ -304821,7 +307264,7 @@ return Effects
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18837"><Properties>
+<Item class="ModuleScript" referent="RBX18846"><Properties>
 <string name="Name">Hud</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- On-screen UI, built in code: hero card with health / energy / ultimate,
@@ -304838,11 +307281,14 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local MapData = require(Shared:WaitForChild("MapData"))
+local Rules = require(Shared:WaitForChild("Progression"))
 
 local Hud = {}
 local player = Players.LocalPlayer
-local Input, CameraRig, Movement
+local Input, CameraRig, Movement, Minimap
 local gui, card, bars, info, msgFrame, banner, combo, menu, dial, help
+local stats, stars, bossBar, missionPanel, prompts, skillsMenu, shopMenu, rewardFeed
+local mission = nil
 local dialIsOpen = false
 local comboCount, comboTimer = 0, 0
 local FONT = Enum.Font.FredokaOne
@@ -305062,7 +307508,7 @@ local function build()
 	label(dial, "OMNITRIX: 1/2/3 to transform, Q to cancel", UDim2.new(1, -60, 0, 24), UDim2.new(0, 30, 1, -40), Color3.fromRGB(200, 255, 200), Enum.TextXAlignment.Center)
 
 	-- Controls overlay.
-	help = new("Frame", { BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.4, Size = UDim2.fromOffset(820, 196), Position = UDim2.new(0.5, -410, 1, -400), BorderSizePixel = 0 }, gui)
+	help = new("Frame", { BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.4, Size = UDim2.fromOffset(840, 228), Position = UDim2.new(0.5, -420, 1, -430), BorderSizePixel = 0 }, gui)
 	corner(help, 0.06)
 	local lines = {
 		"CONTROLS  (F1 to toggle)",
@@ -305071,6 +307517,7 @@ local function build()
 		"V or Alt dodge / air dash / barrel roll   Ctrl in the air: ground pound   B emote   Hold Space falling: glide (Aang)",
 		"E terminals (swap hero / travel) and Jimmy's hover car   P return to the Nexus   M (or Esc) free the mouse",
 		"Ben: 1/2/3 transform, Q Omnitrix dial, G Master Control Glitch, F Way Big (full meter)",
+		"Right click / X counter (on a red !)   T takedown (8+ combo)   Z lock-on   K skills   Shift: wall-run, climb, slide (+Ctrl)",
 	}
 	for i, text in ipairs(lines) do
 		label(help, text, UDim2.new(1, -24, 0, 22), UDim2.fromOffset(12, 8 + (i - 1) * 30), i == 1 and Color3.fromRGB(255, 230, 120) or Color3.new(1, 1, 1))
@@ -305078,6 +307525,193 @@ local function build()
 	task.delay(14, function()
 		help.Visible = false
 	end)
+end
+
+-- Cash, level, XP, wanted stars, boss bar, mission timer.
+local function refreshExtras()
+	local level = player:GetAttribute("Level") or 1
+	local xp = player:GetAttribute("Xp") or 0
+	local need = Rules.xpToNext(level, Config)
+	stats.Level.Text = ("LV %d"):format(level)
+	stats.Cash.Text = ("$%d"):format(player:GetAttribute("Cash") or 0)
+	local points = player:GetAttribute("SkillPoints") or 0
+	stats.Points.Text = points > 0 and ("%d skill point%s (K)"):format(points, points > 1 and "s" or "") or ""
+	stats.XpFill.Size = UDim2.fromScale(math.clamp(xp / need, 0, 1), 1)
+	local heat = player:GetAttribute("Heat") or 0
+	local cooling = player:GetAttribute("HeatCooling")
+	local n = math.floor(heat)
+	local blink = cooling and (os.clock() % 0.6 < 0.3)
+	for i, star in ipairs(stars) do
+		star.TextColor3 = i <= n and Color3.fromRGB(255, 215, 60) or Color3.fromRGB(70, 70, 80)
+		star.TextTransparency = (i <= n and blink) and 0.7 or (n > 0 and 0 or 1)
+		star.TextStrokeTransparency = n > 0 and 0.3 or 1
+	end
+	local bossOn = workspace:GetAttribute("BossActive")
+	bossBar.Visible = bossOn == true
+	if bossOn then
+		local hp, max = workspace:GetAttribute("BossHealth") or 0, workspace:GetAttribute("BossMax") or 1
+		bossBar.Fill.Size = UDim2.fromScale(math.clamp(hp / max, 0, 1), 1)
+		bossBar.Title.Text = (workspace:GetAttribute("BossName") or "Boss") .. ("  %d / %d"):format(hp, max)
+	end
+	if mission then
+		local left = math.max(0, mission.Ends - workspace:GetServerTimeNow())
+		missionPanel.Visible = true
+		missionPanel.Title.Text = ("%s   %d:%02d"):format(mission.Name, math.floor(left / 60), math.floor(left % 60))
+		missionPanel.Body.Text = mission.Text or ""
+	else
+		missionPanel.Visible = false
+	end
+end
+
+function Hud.setPrompts(threat, takedown)
+	if not prompts then
+		return
+	end
+	prompts.Counter.Visible = threat
+	prompts.Counter.TextTransparency = (os.clock() % 0.25 < 0.12) and 0 or 0.25
+	prompts.Takedown.Visible = takedown
+end
+
+function Hud.reward(xp, cash, reason)
+	if not rewardFeed then
+		return
+	end
+	local parts = {}
+	if xp and xp > 0 then
+		table.insert(parts, "+" .. xp .. " XP")
+	end
+	if cash and cash > 0 then
+		table.insert(parts, "+$" .. cash)
+	end
+	if #parts == 0 then
+		return
+	end
+	local l = label(rewardFeed, table.concat(parts, "   ") .. (reason and ("  " .. reason) or ""), UDim2.new(1, 0, 0, 20), UDim2.new(), Color3.fromRGB(255, 225, 120), Enum.TextXAlignment.Right)
+	l.LayoutOrder = math.floor(os.clock() * 100)
+	task.delay(2.5, function()
+		TweenService:Create(l, TweenInfo.new(0.4), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		task.wait(0.45)
+		l:Destroy()
+	end)
+end
+
+function Hud.setMission(m)
+	mission = m
+	if Minimap then
+		Minimap.setWaypoint(m and m.Pos or nil)
+	end
+end
+
+local function menuFrame(name, title, height)
+	local f = new("Frame", { Name = name, Visible = false, BackgroundColor3 = Color3.fromRGB(15, 15, 30), BackgroundTransparency = 0.12, Size = UDim2.fromOffset(520, height), Position = UDim2.new(0.5, -260, 0.5, -height / 2), BorderSizePixel = 0 }, gui)
+	corner(f, 0.05)
+	label(f, title, UDim2.new(1, -40, 0, 34), UDim2.fromOffset(20, 10), Color3.fromRGB(255, 230, 120), Enum.TextXAlignment.Center)
+	local list = new("Frame", { Name = "List", BackgroundTransparency = 1, Size = UDim2.new(1, -40, 1, -110), Position = UDim2.fromOffset(20, 52) }, f)
+	new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+	local close = new("TextButton", { Text = "Close", BackgroundColor3 = Color3.fromRGB(80, 80, 100), TextColor3 = Color3.new(1, 1, 1), Font = FONT, TextScaled = true, Size = UDim2.fromOffset(140, 32), Position = UDim2.new(0.5, -70, 1, -44), BorderSizePixel = 0 }, f)
+	corner(close, 0.3)
+	close.Activated:Connect(function()
+		f.Visible = false
+		Input.setEnabled(true)
+		CameraRig.setCursorFree(false)
+	end)
+	return f
+end
+
+local function row(list, order, text, button, onClick)
+	local r = new("Frame", { BackgroundColor3 = Color3.fromRGB(40, 40, 60), BackgroundTransparency = 0.2, Size = UDim2.new(1, 0, 0, 44), LayoutOrder = order, BorderSizePixel = 0 }, list)
+	corner(r, 0.2)
+	label(r, text, UDim2.new(1, -150, 1, -8), UDim2.fromOffset(10, 4))
+	local b = new("TextButton", { Text = button, Font = FONT, TextScaled = true, BackgroundColor3 = Color3.fromRGB(255, 200, 80), Size = UDim2.fromOffset(120, 32), Position = UDim2.new(1, -128, 0, 6), BorderSizePixel = 0 }, r)
+	corner(b, 0.3)
+	b.Activated:Connect(onClick)
+	return r
+end
+
+local function openSkills()
+	for _, c in ipairs(skillsMenu.List:GetChildren()) do
+		if c:IsA("Frame") then
+			c:Destroy()
+		end
+	end
+	local points = player:GetAttribute("SkillPoints") or 0
+	skillsMenu:FindFirstChildOfClass("TextLabel").Text = ("SKILLS  -  %d point%s to spend"):format(points, points == 1 and "" or "s")
+	for i, id in ipairs(Config.SkillOrder) do
+		local def = Config.Skills[id]
+		local rank = player:GetAttribute("Skill_" .. id) or 0
+		row(skillsMenu.List, i, ("%s  %d/%d\n%s"):format(def.Name, rank, def.Max, def.Desc), rank >= def.Max and "MAX" or "+1", function()
+			ReplicatedStorage.Remotes.Skill:FireServer(id)
+			task.delay(0.3, openSkills)
+		end)
+	end
+	skillsMenu.Visible = true
+	Input.setEnabled(false)
+	CameraRig.setCursorFree(true)
+end
+
+local function openShop(prices)
+	for _, c in ipairs(shopMenu.List:GetChildren()) do
+		if c:IsA("Frame") then
+			c:Destroy()
+		end
+	end
+	for i, item in ipairs(Config.Shop) do
+		local price = prices and prices[item.Id] or item.Price
+		row(shopMenu.List, i, ("%s  -  $%d\n%s"):format(item.Name, price, item.Desc), "Buy", function()
+			ReplicatedStorage.Remotes.Shop:FireServer(item.Id)
+		end)
+	end
+	shopMenu.Visible = true
+	Input.setEnabled(false)
+	CameraRig.setCursorFree(true)
+end
+
+local function buildExtras()
+	-- Level / XP / cash under the hero card.
+	stats = new("Frame", { BackgroundColor3 = Color3.fromRGB(15, 15, 25), BackgroundTransparency = 0.35, Size = UDim2.fromOffset(330, 46), Position = UDim2.fromOffset(16, 122), BorderSizePixel = 0 }, gui)
+	corner(stats, 0.2)
+	local lv = label(stats, "LV 1", UDim2.fromOffset(70, 24), UDim2.fromOffset(10, 4), Color3.fromRGB(255, 230, 120))
+	lv.Name = "Level"
+	local cash = label(stats, "$0", UDim2.fromOffset(110, 24), UDim2.fromOffset(84, 4), Color3.fromRGB(140, 255, 160))
+	cash.Name = "Cash"
+	local pts = label(stats, "", UDim2.fromOffset(140, 18), UDim2.fromOffset(184, 7), Color3.fromRGB(255, 200, 90))
+	pts.Name = "Points"
+	local xpBack = new("Frame", { BackgroundColor3 = Color3.fromRGB(30, 30, 45), Size = UDim2.new(1, -20, 0, 8), Position = UDim2.fromOffset(10, 32), BorderSizePixel = 0 }, stats)
+	corner(xpBack, 0.5)
+	stats.XpFill = new("Frame", { BackgroundColor3 = Color3.fromRGB(255, 210, 80), Size = UDim2.fromScale(0, 1), BorderSizePixel = 0 }, xpBack)
+	corner(stats.XpFill, 0.5)
+	-- Wanted stars, top centre.
+	local starRow = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(200, 34), Position = UDim2.new(0.5, -100, 0, 12) }, gui)
+	new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center }, starRow)
+	stars = {}
+	for i = 1, Config.Heat.Max do
+		local s = label(starRow, "★", UDim2.fromOffset(34, 34), UDim2.new(), Color3.fromRGB(70, 70, 80), Enum.TextXAlignment.Center)
+		s.LayoutOrder = i
+		stars[i] = s
+	end
+	-- Boss bar.
+	bossBar = new("Frame", { Visible = false, BackgroundColor3 = Color3.fromRGB(20, 10, 30), BackgroundTransparency = 0.2, Size = UDim2.new(0.5, 0, 0, 22), Position = UDim2.new(0.25, 0, 0, 56), BorderSizePixel = 0 }, gui)
+	corner(bossBar, 0.4)
+	bossBar.Fill = new("Frame", { BackgroundColor3 = Color3.fromRGB(230, 60, 180), Size = UDim2.fromScale(1, 1), BorderSizePixel = 0 }, bossBar)
+	corner(bossBar.Fill, 0.4)
+	bossBar.Title = label(bossBar, "", UDim2.new(1, -10, 1, 0), UDim2.fromOffset(5, 0), Color3.new(1, 1, 1), Enum.TextXAlignment.Center)
+	bossBar.Title.ZIndex = 3
+	-- Mission panel.
+	missionPanel = new("Frame", { Visible = false, BackgroundColor3 = Color3.fromRGB(15, 15, 25), BackgroundTransparency = 0.3, Size = UDim2.fromOffset(330, 62), Position = UDim2.fromOffset(16, 176), BorderSizePixel = 0 }, gui)
+	corner(missionPanel, 0.15)
+	missionPanel.Title = label(missionPanel, "", UDim2.new(1, -16, 0, 26), UDim2.fromOffset(8, 4), Color3.fromRGB(255, 220, 90))
+	missionPanel.Body = label(missionPanel, "", UDim2.new(1, -16, 0, 22), UDim2.fromOffset(8, 34), Color3.new(1, 1, 1))
+	-- Combat prompts.
+	prompts = {}
+	prompts.Counter = label(gui, "COUNTER! (Right click / X)", UDim2.fromOffset(360, 40), UDim2.new(0.5, -180, 0.5, 60), Color3.fromRGB(255, 80, 80), Enum.TextXAlignment.Center)
+	prompts.Counter.Visible = false
+	prompts.Takedown = label(gui, "TAKEDOWN READY (T)", UDim2.fromOffset(300, 30), UDim2.new(0.5, -150, 0.5, 104), Color3.fromRGB(255, 220, 90), Enum.TextXAlignment.Center)
+	prompts.Takedown.Visible = false
+	-- Reward feed (right side, under world info).
+	rewardFeed = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(320, 140), Position = UDim2.new(1, -336, 0, 140) }, gui)
+	new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Right }, rewardFeed)
+	skillsMenu = menuFrame("SkillsMenu", "SKILLS", 420)
+	shopMenu = menuFrame("ShopMenu", "GEAR LOCKER", 300)
 end
 
 local function refresh(dt)
@@ -305095,7 +307729,7 @@ local function refresh(dt)
 	card.Portrait.Initial.Text = heroId:sub(1, 1)
 	setBar(bars.Health, humanoid.Health / humanoid.MaxHealth, ("  %d"):format(humanoid.Health))
 	local S = Movement.state()
-	setBar(bars.Energy, S.Energy / Config.Player.MaxEnergy)
+	setBar(bars.Energy, S.Energy / Movement.maxEnergy())
 	local meter = character:GetAttribute("Meter") or 0
 	setBar(bars.Meter, meter / 100, meter >= 100 and "  READY (F)" or ("  %d%%"):format(meter))
 	if heroId == "Ben" then
@@ -305113,12 +307747,12 @@ local function refresh(dt)
 	info.Shards.Text = ("Rift shards: %d/%d"):format(player:GetAttribute("Shards_" .. levelName) or 0, workspace:GetAttribute("ShardTotal_" .. levelName) or 0)
 	info.Kills.Text = ("KOs: %d"):format(player:GetAttribute("Kills") or 0)
 
-	comboTimer = comboTimer - dt
-	if comboTimer <= 0 then
-		comboCount = 0
-	end
-	combo.Text = comboCount >= 2 and (comboCount .. " HIT COMBO!") or ""
-	combo.TextTransparency = 1 - math.clamp(comboTimer / 0.5, 0, 1)
+	local c = player:GetAttribute("Combo") or 0
+	local age = workspace:GetServerTimeNow() - (player:GetAttribute("ComboAt") or 0)
+	local fade = math.clamp((Config.Combat.ComboTimeout - age) / 0.5, 0, 1)
+	combo.Text = (c >= 2 and fade > 0) and (c .. " HIT COMBO!") or ""
+	combo.TextTransparency = 1 - fade
+	refreshExtras()
 end
 
 function Hud.setCourse(text)
@@ -305128,8 +307762,20 @@ function Hud.setCourse(text)
 end
 
 function Hud.init(controllers)
-	Input, CameraRig, Movement = controllers.Input, controllers.CameraRig, controllers.Movement
+	Input, CameraRig, Movement, Minimap = controllers.Input, controllers.CameraRig, controllers.Movement, controllers.Minimap
 	build()
+	buildExtras()
+	Input.on("Skills", function(down)
+		if down then
+			if skillsMenu.Visible then
+				skillsMenu.Visible = false
+				Input.setEnabled(true)
+				CameraRig.setCursorFree(false)
+			else
+				openSkills()
+			end
+		end
+	end)
 	Input.on("Help", function(down)
 		if down then
 			help.Visible = not help.Visible
@@ -305151,6 +307797,23 @@ function Hud.start()
 		end
 	end)
 	remotes.OpenTerminal.OnClientEvent:Connect(openMenu)
+	remotes.OpenShop.OnClientEvent:Connect(function(info)
+		if type(info) ~= "table" then
+			return
+		end
+		if info.Skills then
+			openSkills()
+		else
+			openShop(info.Prices)
+		end
+	end)
+	remotes.Objective.OnClientEvent:Connect(function(o)
+		if type(o) ~= "table" or o.Clear then
+			Hud.setMission(nil)
+		else
+			Hud.setMission(o)
+		end
+	end)
 	UserInputService.InputBegan:Connect(function(input)
 		if not menu.Visible then
 			return
@@ -305178,7 +307841,7 @@ return Hud
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18838"><Properties>
+<Item class="ModuleScript" referent="RBX18847"><Properties>
 <string name="Name">Input</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Every game action and its bindings (keyboard, mouse, gamepad, and on-screen
@@ -305211,6 +307874,10 @@ local ACTIONS = {
 	Glitch = { { Enum.KeyCode.G }, nil },
 	Recall = { { Enum.KeyCode.P, Enum.KeyCode.DPadDown }, nil },
 	Help = { { Enum.KeyCode.F1 }, nil },
+	Counter = { { Enum.UserInputType.MouseButton2, Enum.KeyCode.X, Enum.KeyCode.ButtonR1 }, "Counter" },
+	Takedown = { { Enum.KeyCode.T, Enum.KeyCode.DPadLeft }, "Takedown" },
+	LockOn = { { Enum.KeyCode.Z, Enum.UserInputType.MouseButton3, Enum.KeyCode.ButtonR3 }, nil },
+	Skills = { { Enum.KeyCode.K, Enum.KeyCode.ButtonSelect }, nil },
 }
 
 local function emit(name, down)
@@ -305251,7 +307918,10 @@ function Input.init()
 	end
 	-- Lay out the touch buttons in an arc above the jump button.
 	if UserInputService.TouchEnabled then
-		local spots = { Attack = { 0.62, 0.48 }, Sig = { 0.72, 0.36 }, Sig2 = { 0.84, 0.30 }, Ult = { 0.52, 0.62 }, Fly = { 0.52, 0.30 }, Dodge = { 0.62, 0.20 }, Down = { 0.40, 0.55 } }
+		local spots = {
+			Attack = { 0.62, 0.48 }, Sig = { 0.72, 0.36 }, Sig2 = { 0.84, 0.30 }, Ult = { 0.52, 0.62 }, Fly = { 0.52, 0.30 },
+			Dodge = { 0.62, 0.20 }, Down = { 0.40, 0.55 }, Counter = { 0.74, 0.62 }, Takedown = { 0.40, 0.25 },
+		}
 		for name, p in pairs(spots) do
 			ContextActionService:SetPosition("MT_" .. name, UDim2.new(p[1], 0, p[2], 0))
 		end
@@ -305309,7 +307979,272 @@ return Input
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18839"><Properties>
+<Item class="ModuleScript" referent="RBX18848"><Properties>
+<string name="Name">Minimap</string>
+<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Rotating radar in the corner, open-world style: roads, and blips for
+-- mission markers, rifts, terminals, shops, uncollected shards, enemies,
+-- other players, cars, the boss, and your current objective waypoint (with an
+-- arrow on the rim when it's off the map).
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local MapData = require(Shared:WaitForChild("MapData"))
+
+local Minimap = {}
+local player = Players.LocalPlayer
+local CameraRig, Effects
+local SIZE = 220
+local RANGE = 260 -- studs from centre to rim
+local canvas, mapLayer, blipLayer, arrow
+local roadFrames = {}
+local pool = {}
+local used = 0
+local waypoint = nil
+
+local function frame(parent, props)
+	local f = Instance.new("Frame")
+	f.BorderSizePixel = 0
+	for k, v in pairs(props) do
+		f[k] = v
+	end
+	f.Parent = parent
+	return f
+end
+
+local function build()
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "Minimap"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.Parent = player:WaitForChild("PlayerGui")
+	canvas = Instance.new("CanvasGroup")
+	canvas.Name = "Radar"
+	canvas.Size = UDim2.fromOffset(SIZE, SIZE)
+	canvas.AnchorPoint = Vector2.new(1, 1)
+	canvas.Position = UDim2.new(1, -16, 1, -16)
+	canvas.BackgroundColor3 = Color3.fromRGB(30, 60, 40)
+	canvas.BackgroundTransparency = 0.15
+	canvas.Parent = gui
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.5, 0)
+	corner.Parent = canvas
+	mapLayer = frame(canvas, { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 })
+	blipLayer = frame(canvas, { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 3 })
+	for _, road in ipairs(MapData.Roads or {}) do
+		local f = frame(mapLayer, { BackgroundColor3 = Color3.fromRGB(70, 70, 82), AnchorPoint = Vector2.new(0.5, 0.5), ZIndex = 2 })
+		table.insert(roadFrames, { Frame = f, Road = road })
+	end
+	-- Player arrow (always centre, pointing up = camera forward).
+	local me = frame(canvas, { Size = UDim2.fromOffset(12, 12), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 5, Rotation = 45 })
+	local s = Instance.new("UIStroke")
+	s.Thickness = 2
+	s.Parent = me
+	local ring = Instance.new("UIStroke")
+	ring.Thickness = 3
+	ring.Color = Color3.fromRGB(240, 240, 250)
+	ring.Parent = canvas
+	-- Rim arrow toward an off-map waypoint.
+	arrow = Instance.new("TextLabel")
+	arrow.BackgroundTransparency = 1
+	arrow.Size = UDim2.fromOffset(22, 22)
+	arrow.AnchorPoint = Vector2.new(0.5, 0.5)
+	arrow.Font = Enum.Font.FredokaOne
+	arrow.Text = "▲"
+	arrow.TextScaled = true
+	arrow.TextColor3 = Color3.fromRGB(255, 220, 60)
+	arrow.TextStrokeTransparency = 0
+	arrow.ZIndex = 6
+	arrow.Parent = canvas
+	local north = Instance.new("TextLabel")
+	north.Name = "North"
+	north.BackgroundTransparency = 1
+	north.Size = UDim2.fromOffset(18, 18)
+	north.AnchorPoint = Vector2.new(0.5, 0.5)
+	north.Font = Enum.Font.FredokaOne
+	north.Text = "N"
+	north.TextScaled = true
+	north.TextColor3 = Color3.new(1, 1, 1)
+	north.TextStrokeTransparency = 0
+	north.ZIndex = 6
+	north.Parent = canvas
+end
+
+local function blip(color, size, round)
+	used = used + 1
+	local f = pool[used]
+	if not f then
+		f = frame(blipLayer, { AnchorPoint = Vector2.new(0.5, 0.5), ZIndex = 4 })
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(0.5, 0)
+		c.Parent = f
+		pool[used] = f
+	end
+	f.Visible = true
+	f.BackgroundColor3 = color
+	f.Size = UDim2.fromOffset(size, size)
+	f.UICorner.CornerRadius = UDim.new(round and 0.5 or 0.15, 0)
+	return f
+end
+
+-- World position -> radar offset in pixels (camera forward is up).
+local function project(origin, yawRad, pos)
+	local rel = pos - origin
+	local c, s = math.cos(yawRad), math.sin(yawRad)
+	-- Rotate into camera space: x right, y forward.
+	local x = rel.X * c - rel.Z * s
+	local z = rel.X * s + rel.Z * c
+	local scale = (SIZE * 0.5) / RANGE
+	return x * scale, z * scale
+end
+
+local function place(f, x, y, clampToRim)
+	local r = SIZE * 0.5 - 8
+	local d = math.sqrt(x * x + y * y)
+	if d > r then
+		if not clampToRim then
+			f.Visible = false
+			return false
+		end
+		x, y = x / d * r, y / d * r
+	end
+	f.Position = UDim2.new(0.5, x, 0.5, y)
+	return true
+end
+
+function Minimap.setWaypoint(pos)
+	waypoint = pos
+end
+
+local function update()
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return
+	end
+	local origin = root.Position
+	local yawRad = math.rad(CameraRig.yaw())
+	used = 0
+	-- Roads (Retroville only).
+	local inRetro = (player:GetAttribute("Level") or "") == Config.Levels.Retroville
+	local scale = (SIZE * 0.5) / RANGE
+	for _, r in ipairs(roadFrames) do
+		if inRetro then
+			local x, y = project(origin, yawRad, r.Road.C)
+			local len, wid = r.Road.L * scale, math.max(3, r.Road.W * scale)
+			r.Frame.Visible = true
+			r.Frame.Size = r.Road.Axis == "X" and UDim2.fromOffset(len, wid) or UDim2.fromOffset(wid, len)
+			r.Frame.Position = UDim2.new(0.5, x, 0.5, y)
+			r.Frame.Rotation = math.deg(yawRad)
+		else
+			r.Frame.Visible = false
+		end
+	end
+	local function add(pos, color, size, round, rim)
+		local f = blip(color, size, round)
+		local x, y = project(origin, yawRad, pos)
+		place(f, x, y, rim)
+	end
+	local interact = workspace:FindFirstChild("Interactables")
+	if interact then
+		for _, p in ipairs(interact:GetChildren()) do
+			if p:IsA("BasePart") then
+				if p:GetAttribute("Mission") then
+					add(p.Position, Color3.fromRGB(255, 210, 60), 12, false, true)
+				elseif p.Name:find("Terminal") or p.Name:find("Service") then
+					add(p.Position, Color3.fromRGB(120, 220, 255), 8, false, false)
+				end
+			end
+		end
+	end
+	local enemies = workspace:FindFirstChild("Enemies")
+	if enemies then
+		for _, m in ipairs(enemies:GetChildren()) do
+			if m:IsA("Model") and m.PrimaryPart then
+				if m:GetAttribute("Enemy") == "Boss" then
+					add(m.PrimaryPart.Position, Color3.fromRGB(255, 60, 200), 16, true, true)
+				elseif m:GetAttribute("Enemy") then
+					add(m.PrimaryPart.Position, Color3.fromRGB(255, 70, 70), 6, true, false)
+				elseif m.Name == "Rift" then
+					local core = m:FindFirstChild("Core")
+					if core then
+						add(core.Position, Color3.fromRGB(190, 90, 255), 12, true, true)
+					end
+				end
+			end
+		end
+	end
+	local shards = workspace:FindFirstChild("Shards")
+	if shards then
+		for _, m in ipairs(shards:GetChildren()) do
+			if m:IsA("Model") and m.PrimaryPart then
+				add(m.PrimaryPart.Position, Color3.fromRGB(200, 160, 255), 5, true, false)
+			end
+		end
+	end
+	local vehicles = workspace:FindFirstChild("Vehicles")
+	if vehicles then
+		for _, m in ipairs(vehicles:GetChildren()) do
+			if m.PrimaryPart then
+				add(m.PrimaryPart.Position, Color3.fromRGB(235, 235, 240), 6, false, false)
+			end
+		end
+	end
+	for _, other in ipairs(Players:GetPlayers()) do
+		local r = other ~= player and other.Character and other.Character:FindFirstChild("HumanoidRootPart")
+		if r then
+			add(r.Position, Color3.fromRGB(80, 160, 255), 8, true, true)
+		end
+	end
+	-- Objective waypoint: blip, or an arrow on the rim.
+	arrow.Visible = false
+	if waypoint then
+		local x, y = project(origin, yawRad, waypoint)
+		local d = math.sqrt(x * x + y * y)
+		local r = SIZE * 0.5 - 10
+		if d > r then
+			arrow.Visible = true
+			arrow.Position = UDim2.new(0.5, x / d * r, 0.5, y / d * r)
+			arrow.Rotation = math.deg(math.atan2(x, -y))
+		else
+			add(waypoint, Color3.fromRGB(120, 255, 120), 12, true, true)
+		end
+	end
+	-- North marker on the rim (world -Z is north).
+	local nx, ny = project(origin, yawRad, origin + Vector3.new(0, 0, -RANGE * 2))
+	local nd = math.sqrt(nx * nx + ny * ny)
+	canvas.North.Position = UDim2.new(0.5, nx / nd * (SIZE * 0.5 - 12), 0.5, ny / nd * (SIZE * 0.5 - 12))
+	for i = used + 1, #pool do
+		pool[i].Visible = false
+	end
+end
+
+function Minimap.init(controllers)
+	CameraRig, Effects = controllers.CameraRig, controllers.Effects
+end
+
+function Minimap.start()
+	build()
+	local accum = 0
+	RunService.RenderStepped:Connect(function(dt)
+		accum = accum + dt
+		if accum < 1 / 30 then
+			return
+		end
+		accum = 0
+		update()
+	end)
+end
+
+return Minimap
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX18849"><Properties>
 <string name="Name">Movement</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- The local hero's movement, ported from the prototype (Prototype/src/Game.cpp):
@@ -305330,10 +308265,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+local Rules = require(Shared:WaitForChild("Progression"))
 
 local Movement = {}
 local player = Players.LocalPlayer
-local Input, CameraRig, Hud
+local Input, CameraRig, Hud, CombatAssist
 local remotes
 
 local S = {} -- local movement state (also read by Animator, CameraRig, Hud)
@@ -305351,6 +308287,9 @@ local function reset()
 		WalkPhase = 0, Coyote = 0, Jumped = false, JumpCut = false, Grounded = true, WasGrounded = true,
 		AttackAnim = 0, AttackDur = 0.25, AttackStep = 0, LastAttack = -10, AttackCd = 0, SigCd = 0, Sig2Cd = 0,
 		Breath = false, LastSafe = nil, FaceYaw = nil,
+		-- Parkour / combat additions.
+		Lunge = nil, Swing = nil, WallRun = nil, Climb = false, ClimbTime = 0, MantleCd = 0, Slide = 0, SlideDir = Vector3.zero,
+		SlideSpeed = 0, CounterAnim = 0, BlockAnim = 0, TakedownAnim = 0,
 	}
 end
 reset()
@@ -305402,6 +308341,19 @@ local function scale()
 		return 1
 	end
 	return math.max(0.5, (humanoid.HipHeight + root.Size.Y * 0.5) / 3)
+end
+
+-- Skill bonuses (ranks replicate as player attributes).
+local function skills()
+	local ranks = {}
+	for _, name in ipairs(Config.SkillOrder) do
+		ranks[name] = player:GetAttribute("Skill_" .. name) or 0
+	end
+	return Rules.effects(ranks)
+end
+
+function Movement.maxEnergy()
+	return Config.Player.MaxEnergy + skills().Energy
 end
 
 local function ensureMover(root)
@@ -305601,10 +308553,20 @@ local function tryAttack()
 	S.AttackCd = a.Cooldown + (fin and 0.15 or 0)
 	S.EmoteTime = 0
 	local dir = aimDir(root)
-	-- Face the target for the swing; melee lunges a little.
+	-- Aim at the soft/hard target; melee attacks lunge across the gap to it.
+	local target = CombatAssist and CombatAssist.target()
+	if target and target.PrimaryPart then
+		local tp = target.PrimaryPart.Position
+		local to = tp - root.Position
+		dir = to.Unit
+		local gap = to.Magnitude - target.PrimaryPart.Size.Y * 0.5
+		if a.Kind == "Melee" and not S.Flying and gap > 4 and gap < Config.Combat.LungeRange then
+			S.Lunge = { Model = target, Time = 0.4 }
+		end
+	end
 	S.FaceYaw = yawOf(Vector3.new(dir.X, 0, dir.Z))
 	S.FaceTime = S.AttackDur
-	if a.Kind == "Melee" and S.Grounded and not S.Flying then
+	if a.Kind == "Melee" and S.Grounded and not S.Flying and not S.Lunge then
 		local flat = Vector3.new(dir.X, 0, dir.Z)
 		if flat.Magnitude > 0.01 then
 			root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + flat.Unit * (fin and 17 or 10)
@@ -305642,15 +308604,22 @@ local function onSig(down)
 			params.FilterDescendantsInstances = { character, workspace:FindFirstChild("Shards") }
 			local hit = workspace:Raycast(cam.Position, cam.LookVector * 230, params)
 			if hit and (hit.Position - root.Position).Magnitude > 7 then
-				S.Grapple = hit.Position
-				local v = root.AssemblyLinearVelocity
-				root.AssemblyLinearVelocity = Vector3.new(v.X, math.max(v.Y, 13), v.Z)
+				if not S.Grounded and hit.Position.Y > root.Position.Y + 6 then
+					Movement.startSwing(root, hit.Position)
+				else
+					S.Grapple = hit.Position
+					local v = root.AssemblyLinearVelocity
+					root.AssemblyLinearVelocity = Vector3.new(v.X, math.max(v.Y, 13), v.Z)
+				end
 			else
 				say("Nothing to grapple in range", Color3.fromRGB(255, 200, 120))
 			end
 		else
-			if S.Grapple and not S.Grounded then
+			if (S.Grapple or S.Swing) and not S.Grounded then
 				S.FlipTime = 0.5
+			end
+			if S.Swing then
+				Movement.endSwing(root, true)
 			end
 			S.Grapple = nil
 		end
@@ -305798,10 +308767,22 @@ local function onDown(down)
 		return
 	end
 	local character, humanoid, root = charParts()
-	if not character or S.Grounded or S.Flying or S.Pounding or S.Intangible or S.Grapple or humanoid.SeatPart then
+	if not character or S.Flying or S.Pounding or S.Intangible or S.Grapple or humanoid.SeatPart then
 		return
 	end
 	if formId() == "Cannonbolt" then
+		return
+	end
+	if S.Grounded then
+		-- Sprint + crouch = slide.
+		local v = root.AssemblyLinearVelocity
+		local flat = Vector3.new(v.X, 0, v.Z)
+		if Input.held("Boost") and flat.Magnitude > 20 and S.Slide <= 0 then
+			S.Slide = 0.75
+			S.SlideDir = flat.Unit
+			S.SlideSpeed = flat.Magnitude * 1.35
+			S.EmoteTime = 0
+		end
 		return
 	end
 	if not groundBelow(root, humanoid, 5) then
@@ -305857,6 +308838,15 @@ local function onJumpRequest()
 		return
 	end
 	local f = formId()
+	if S.WallRun then
+		-- Kick off the wall you're running along.
+		local out = S.WallRun.Normal * 34
+		root.AssemblyLinearVelocity = Vector3.new(out.X + v.X * 0.5, jumpV, out.Z + v.Z * 0.5)
+		S.WallRun = nil
+		S.AirDashUsed = false
+		S.FlipTime = 0.5
+		return
+	end
 	if S.WallTimer > 0 and (not f or f == "XLR8") and not S.JustJumped then
 		local out = S.WallNormal * Config.Moves.WallJumpOut
 		root.AssemblyLinearVelocity = Vector3.new(out.X, jumpV * 0.95, out.Z)
@@ -305907,7 +308897,7 @@ local function updateFlight(dt, humanoid, root)
 	local v
 	if wishLen > 0.05 then
 		local wishDir = wish.Unit
-		local top = (boost and h.FlyBoost or h.FlySpeed) * wishLen - dir.Y * style.DiveGain
+		local top = (boost and h.FlyBoost or h.FlySpeed) * skills().Flight * wishLen - dir.Y * style.DiveGain
 		local slow = math.clamp(1 - spd / h.FlySpeed, 0, 1)
 		local turn = math.rad(style.TurnRate * (1 + 4 * slow) * (boost and 0.8 or 1)) * dt
 		local newDir = spd > 5 and rotateToward(dir, wishDir, turn) or wishDir
@@ -305965,7 +308955,8 @@ local function updateGlide(dt, root)
 	end
 	local camPitch = math.deg(math.asin(math.clamp(CameraRig.lookVector().Y, -1, 1)))
 	local pitch = math.rad(math.clamp(camPitch + 8, -55, 25))
-	S.GlideSpeed = math.clamp(S.GlideSpeed + (-math.sin(pitch) * G.DiveAccel - (S.GlideSpeed - G.Cruise) * 0.35) * dt, G.MinSpeed, G.MaxSpeed)
+	local aero = skills().Flight
+	S.GlideSpeed = math.clamp(S.GlideSpeed + (-math.sin(pitch) * G.DiveAccel - (S.GlideSpeed - G.Cruise * aero) * 0.35) * dt, G.MinSpeed, G.MaxSpeed * aero)
 	local mv = Input.move()
 	local travel = flat.Magnitude > 2 and yawOf(flat) or CameraRig.yaw()
 	local target = CameraRig.yaw() - mv.X * 40
@@ -306010,6 +309001,177 @@ local function updateWalls(root, humanoid)
 	end
 end
 
+-- Parkour --------------------------------------------------------------------------
+
+local function wallRay(root, dir, dist)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { player.Character, workspace:FindFirstChild("Shards"), workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("LocalFx") }
+	local hit = workspace:Raycast(root.Position, dir * dist, params)
+	if hit and math.abs(hit.Normal.Y) < 0.4 and hit.Instance.CanCollide then
+		return hit, params
+	end
+	return nil, params
+end
+
+local function flatUnit(v)
+	local f = Vector3.new(v.X, 0, v.Z)
+	return f.Magnitude > 1e-3 and f.Unit or Vector3.zero
+end
+
+-- Wall-climb (sprint into a wall), wall-run (sprint alongside one in the air),
+-- and mantling onto ledges. Returns true while it's driving the character.
+function Movement.updateParkour(dt, humanoid, root, f)
+	if (f and f.Id ~= "XLR8") or S.Grapple or S.Pounding or S.Dodge > 0 or S.Intangible then
+		S.WallRun = nil
+		S.Climb = false
+		return false
+	end
+	local boost = Input.held("Boost")
+	local v = root.AssemblyLinearVelocity
+	local flat = Vector3.new(v.X, 0, v.Z)
+	local mv = Input.move()
+	local cam = workspace.CurrentCamera.CFrame
+	local wish = flatUnit(cam.LookVector) * mv.Y + flatUnit(cam.RightVector) * mv.X
+	local reach = root.Size.X * 0.5
+
+	-- Climb straight up while sprinting into a wall (costs energy).
+	if boost and wish.Magnitude > 0.3 and S.Energy > 1 then
+		local hit = wallRay(root, wish.Unit, reach + 1.6)
+		if hit and wish.Unit:Dot(-hit.Normal) > 0.6 then
+			S.Climb = true
+			S.WallRun = nil
+			S.Energy = math.max(0, S.Energy - 18 * dt)
+			local n = flatUnit(hit.Normal)
+			drive(root, "Vector", Vector3.new(0, 26, 0) - n * 3, yawOf(-n))
+			humanoid.AutoRotate = false
+			return true
+		end
+	end
+	if S.Climb then
+		-- The wall ran out under us: vault over the top.
+		S.Climb = false
+		drive(root, nil)
+		root.AssemblyLinearVelocity = Vector3.new(0, 30, 0) + flatUnit(root.CFrame.LookVector) * 16
+		S.MantleCd = 0.4
+		return false
+	end
+	if S.Grounded then
+		S.WallRun = nil
+		return false
+	end
+
+	if S.WallRun then
+		local w = S.WallRun
+		w.Time = w.Time - dt
+		local hit = wallRay(root, -w.Normal, reach + 2.4)
+		if not boost or w.Time <= 0 or not hit then
+			S.WallRun = nil
+			drive(root, nil)
+			return false
+		end
+		local n = flatUnit(hit.Normal)
+		w.Normal = n
+		local along = w.Dir - n * w.Dir:Dot(n)
+		w.Dir = along.Magnitude > 0.1 and along.Unit or w.Dir
+		local k = w.Time / 1.4
+		drive(root, "Vector", w.Dir * w.Speed + Vector3.new(0, -6 + 12 * k, 0) - n * 2, yawOf(w.Dir))
+		humanoid.AutoRotate = false
+		return true
+	elseif boost and flat.Magnitude > 14 then
+		local right = flatUnit(root.CFrame.RightVector)
+		for _, side in ipairs({ 1, -1 }) do
+			local hit = wallRay(root, right * side, reach + 2)
+			if hit then
+				local n = flatUnit(hit.Normal)
+				local along = flat - n * flat:Dot(n)
+				if along.Magnitude > 8 then
+					S.WallRun = { Normal = n, Dir = along.Unit, Time = 1.4, Speed = math.max(flat.Magnitude, 34), Side = side }
+					S.WallSlide = 0
+					return true
+				end
+			end
+		end
+	end
+
+	-- Mantle: moving into a wall whose top is just above head height.
+	if S.MantleCd <= 0 and wish.Magnitude > 0.3 then
+		local hit, params = wallRay(root, wish.Unit, reach + 1.4)
+		if hit then
+			local high = root.Position + Vector3.new(0, 3.4 * scale(), 0)
+			if not workspace:Raycast(high, wish.Unit * (reach + 2), params) then
+				root.AssemblyLinearVelocity = Vector3.new(0, 32, 0) + wish.Unit * 14
+				S.MantleCd = 0.6
+			end
+		end
+	end
+	return false
+end
+
+-- Swinging (El Tigre's chain on anything above him): a real rope, pump along
+-- the arc, steer with the stick, let go to fling.
+function Movement.startSwing(root, point)
+	Movement.endSwing(root, false)
+	local anchor = Instance.new("Part")
+	anchor.Name = "SwingAnchor"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.Transparency = 1
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.CFrame = CFrame.new(point)
+	anchor.Parent = workspace:FindFirstChild("LocalFx") or workspace
+	local a1 = Instance.new("Attachment")
+	a1.Parent = anchor
+	local rope = Instance.new("RopeConstraint")
+	rope.Attachment0 = ensureMover(root).Att
+	rope.Attachment1 = a1
+	rope.Length = (point - root.Position).Magnitude
+	rope.Visible = true
+	rope.Thickness = 0.18
+	rope.Color = BrickColor.new("Light stone grey")
+	rope.Parent = anchor
+	S.Swing = { Anchor = anchor, Point = point, Rope = rope }
+	drive(root, nil)
+end
+
+function Movement.updateSwing(dt, root)
+	local sw = S.Swing
+	local v = root.AssemblyLinearVelocity
+	local toPoint = (sw.Point - root.Position).Unit
+	local tangent = v - toPoint * v:Dot(toPoint)
+	local mv = Input.move()
+	local cam = workspace.CurrentCamera.CFrame
+	local wish = flatUnit(cam.LookVector) * mv.Y + flatUnit(cam.RightVector) * mv.X
+	local accel = Vector3.zero
+	if tangent.Magnitude > 2 then
+		accel = tangent.Unit * 22
+	end
+	if wish.Magnitude > 0.2 then
+		accel = accel + wish.Unit * 18
+	end
+	root.AssemblyLinearVelocity = v + accel * dt
+	sw.Rope.Length = math.max(12, sw.Rope.Length - 6 * dt)
+	local m = ensureMover(root)
+	local flat = Vector3.new(v.X, 0, v.Z)
+	if flat.Magnitude > 2 then
+		m.Align.CFrame = CFrame.Angles(0, math.rad(yawOf(flat)), 0)
+		m.Align.MaxTorque = root.AssemblyMass * 5000
+	end
+end
+
+function Movement.endSwing(root, fling)
+	if not S.Swing then
+		return
+	end
+	S.Swing.Anchor:Destroy()
+	S.Swing = nil
+	if fling and root.Parent then
+		local v = root.AssemblyLinearVelocity
+		root.AssemblyLinearVelocity = v * 1.15 + Vector3.new(0, 14, 0)
+	end
+end
+
 local function step(dt)
 	local character, humanoid, root = charParts()
 	if not character then
@@ -306035,11 +309197,15 @@ local function step(dt)
 	S.WallTimer = S.WallTimer - dt
 	S.WallSlide = S.WallSlide - dt
 	S.FaceTime = (S.FaceTime or 0) - dt
+	S.MantleCd = S.MantleCd - dt
+	S.CounterAnim = math.max(0, S.CounterAnim - dt)
+	S.BlockAnim = math.max(0, S.BlockAnim - dt)
+	S.TakedownAnim = math.max(0, S.TakedownAnim - dt)
 	if S.Dodge > 0 then
 		S.Dodge = math.max(0, S.Dodge - dt)
 	end
 	if not S.Intangible and not S.Boosting and not S.Breath then
-		S.Energy = math.min(Config.Player.MaxEnergy, S.Energy + Config.Player.EnergyRegen * dt)
+		S.Energy = math.min(Movement.maxEnergy(), S.Energy + Config.Player.EnergyRegen * dt)
 	end
 	if humanoid.SeatPart then
 		if S.Flying then
@@ -306143,14 +309309,44 @@ local function step(dt)
 		character:SetAttribute("WalkSpeedBase", humanoid.WalkSpeed)
 		base = humanoid.WalkSpeed
 	end
-	local walkTarget = (f and f.Walk or h.Walk) * (Input.held("Boost") and not f and 1.45 or 1) * (S.Scooter > 0 and 2.4 or 1)
+	local walkTarget = (f and f.Walk or h.Walk) * (Input.held("Boost") and not f and 1.45 or 1) * (S.Scooter > 0 and 2.4 or 1) * skills().Walk
 	humanoid.WalkSpeed = S.EmoteTime > 0 and 0 or walkTarget
 
 	-- Movement modes.
 	local canGlide = f and f.Glide or (not f and h.CanGlide)
+	if not S.Grounded and S.Slide > 0 then
+		S.Slide = 0
+	end
+	if S.Swing and (S.Grounded or S.Flying) then
+		Movement.endSwing(root, false)
+	end
 	if S.Flying then
 		S.Gliding = false
 		updateFlight(dt, humanoid, root)
+	elseif S.Lunge then
+		local m = S.Lunge.Model
+		S.Lunge.Time = S.Lunge.Time - dt
+		if not m.Parent or not m.PrimaryPart or S.Lunge.Time <= 0 then
+			S.Lunge = nil
+			drive(root, nil)
+		else
+			local to = m.PrimaryPart.Position - root.Position
+			local flat = Vector3.new(to.X, 0, to.Z)
+			if flat.Magnitude - m.PrimaryPart.Size.Y * 0.5 < 3.5 then
+				S.Lunge = nil
+				drive(root, nil)
+			else
+				drive(root, "Plane", flat.Unit * Config.Combat.LungeSpeed, yawOf(flat))
+			end
+		end
+	elseif S.Swing then
+		Movement.updateSwing(dt, root)
+	elseif S.Slide > 0 then
+		S.Slide = math.max(0, S.Slide - dt)
+		local k = S.Slide / 0.75
+		drive(root, "Plane", S.SlideDir * S.SlideSpeed * (0.6 + 0.4 * k), yawOf(S.SlideDir))
+	elseif Movement.updateParkour(dt, humanoid, root, f) then
+		-- wall-run / climb / mantle in control
 	elseif S.Pounding then
 		drive(root, "Vector", Vector3.new(0, -Config.Moves.PoundSpeed, 0), nil)
 	elseif S.Dodge > 0 then
@@ -306225,6 +309421,8 @@ local function step(dt)
 		Emote = S.EmoteTime > 0, WallSlide = S.WallSlide > 0, Boosting = S.Boosting, Jetpack = S.Jetpack > 0,
 		Scooter = S.Scooter > 0, Intangible = S.Intangible, Takeoff = S.TakeoffTime > 0, Grapple = S.Grapple ~= nil,
 		Breath = S.Breath, DodgeSide = S.DodgeSide, FlyBank = math.floor(S.FlyBank + 0.5), FlyPitch = math.floor(S.FlyPitch + 0.5),
+		Slide = S.Slide > 0, WallRun = S.WallRun ~= nil, Climb = S.Climb, Swing = S.Swing ~= nil,
+		WallSide = S.WallRun and S.WallRun.Side or 0, Lunge = S.Lunge ~= nil,
 	}
 	local changed = false
 	for k, v in pairs(report) do
@@ -306241,7 +309439,7 @@ local function step(dt)
 end
 
 function Movement.init(controllers)
-	Input, CameraRig, Hud = controllers.Input, controllers.CameraRig, controllers.Hud
+	Input, CameraRig, Hud, CombatAssist = controllers.Input, controllers.CameraRig, controllers.Hud, controllers.CombatAssist
 	Input.on("Sig", onSig)
 	Input.on("Sig2", onSig2)
 	Input.on("Ult", onUlt)
@@ -306312,7 +309510,7 @@ return Movement
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX18840"><Properties>
+<Item class="ModuleScript" referent="RBX18850"><Properties>
 <string name="Name">Vehicle</string>
 <ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Jimmy's hover car (anyone can drive it): sit in the seat (E), then
@@ -306426,16 +309624,16 @@ return Vehicle
 </Item>
 </Item>
 </Item>
-<Item class="StarterCharacterScripts" referent="RBX18841"><Properties>
+<Item class="StarterCharacterScripts" referent="RBX18851"><Properties>
 <string name="Name">StarterCharacterScripts</string>
 </Properties>
-<Item class="LocalScript" referent="RBX18842"><Properties>
+<Item class="LocalScript" referent="RBX18852"><Properties>
 <string name="Name">Animate</string>
 <ProtectedString name="Source"><![CDATA[-- Replaced by Client/Controllers/Animator (procedural animation).
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="Script" referent="RBX18843"><Properties>
+<Item class="Script" referent="RBX18853"><Properties>
 <string name="Name">Health</string>
 <ProtectedString name="Source"><![CDATA[-- Health regeneration is handled by Server/Systems/Combat.
 ]]></ProtectedString>
@@ -306444,7 +309642,7 @@ return Vehicle
 </Item>
 </Item>
 </Item>
-<Item class="StarterGui" referent="RBX18844"><Properties>
+<Item class="StarterGui" referent="RBX18854"><Properties>
 <string name="Name">StarterGui</string>
 </Properties>
 </Item>

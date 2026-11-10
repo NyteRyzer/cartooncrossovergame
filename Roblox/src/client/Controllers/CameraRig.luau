@@ -27,6 +27,12 @@ function CameraRig.shake(amount)
 end
 
 -- Menus free the cursor; gameplay locks it to the centre for mouse-look.
+-- A quick zoom kick for big hits (finishers, takedowns).
+local punch = 0
+function CameraRig.punch()
+	punch = 1
+end
+
 function CameraRig.setCursorFree(free)
 	cursorFree = free
 end
@@ -129,7 +135,8 @@ function CameraRig.start()
 		dist = dist + (want - dist) * math.min(1, dt * 5)
 		local fovWant = 70 + (fast and 18 * math.clamp((speed - 43) / 73, 0, 1) or 0) + (state.BoostFx or 0) * 25
 		fov = fov + (fovWant - fov) * math.min(1, dt * 4)
-		camera.FieldOfView = fov
+		punch = math.max(0, punch - dt * 4)
+		camera.FieldOfView = fov - punch * 12
 
 		local rot = CFrame.Angles(0, math.rad(yaw), 0) * CFrame.Angles(math.rad(pitch), 0, 0)
 		local shoulder = seat and 0 or 1.5 * math.sqrt(scale)

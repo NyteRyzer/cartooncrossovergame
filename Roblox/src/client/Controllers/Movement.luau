@@ -17,10 +17,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+local Rules = require(Shared:WaitForChild("Progression"))
 
 local Movement = {}
 local player = Players.LocalPlayer
-local Input, CameraRig, Hud
+local Input, CameraRig, Hud, CombatAssist
 local remotes
 
 local S = {} -- local movement state (also read by Animator, CameraRig, Hud)
@@ -38,6 +39,9 @@ local function reset()
 		WalkPhase = 0, Coyote = 0, Jumped = false, JumpCut = false, Grounded = true, WasGrounded = true,
 		AttackAnim = 0, AttackDur = 0.25, AttackStep = 0, LastAttack = -10, AttackCd = 0, SigCd = 0, Sig2Cd = 0,
 		Breath = false, LastSafe = nil, FaceYaw = nil,
+		-- Parkour / combat additions.
+		Lunge = nil, Swing = nil, WallRun = nil, Climb = false, ClimbTime = 0, MantleCd = 0, Slide = 0, SlideDir = Vector3.zero,
+		SlideSpeed = 0, CounterAnim = 0, BlockAnim = 0, TakedownAnim = 0,
 	}
 end
 reset()
@@ -89,6 +93,19 @@ local function scale()
 		return 1
 	end
 	return math.max(0.5, (humanoid.HipHeight + root.Size.Y * 0.5) / 3)
+end
+
+-- Skill bonuses (ranks replicate as player attributes).
+local function skills()
+	local ranks = {}
+	for _, name in ipairs(Config.SkillOrder) do
+		ranks[name] = player:GetAttribute("Skill_" .. name) or 0
+	end
+	return Rules.effects(ranks)
+end
+
+function Movement.maxEnergy()
+	return Config.Player.MaxEnergy + skills().Energy
 end
 
 local function ensureMover(root)
@@ -288,10 +305,20 @@ local function tryAttack()
 	S.AttackCd = a.Cooldown + (fin and 0.15 or 0)
 	S.EmoteTime = 0
 	local dir = aimDir(root)
-	-- Face the target for the swing; melee lunges a little.
+	-- Aim at the soft/hard target; melee attacks lunge across the gap to it.
+	local target = CombatAssist and CombatAssist.target()
+	if target and target.PrimaryPart then
+		local tp = target.PrimaryPart.Position
+		local to = tp - root.Position
+		dir = to.Unit
+		local gap = to.Magnitude - target.PrimaryPart.Size.Y * 0.5
+		if a.Kind == "Melee" and not S.Flying and gap > 4 and gap < Config.Combat.LungeRange then
+			S.Lunge = { Model = target, Time = 0.4 }
+		end
+	end
 	S.FaceYaw = yawOf(Vector3.new(dir.X, 0, dir.Z))
 	S.FaceTime = S.AttackDur
-	if a.Kind == "Melee" and S.Grounded and not S.Flying then
+	if a.Kind == "Melee" and S.Grounded and not S.Flying and not S.Lunge then
 		local flat = Vector3.new(dir.X, 0, dir.Z)
 		if flat.Magnitude > 0.01 then
 			root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + flat.Unit * (fin and 17 or 10)
@@ -329,15 +356,22 @@ local function onSig(down)
 			params.FilterDescendantsInstances = { character, workspace:FindFirstChild("Shards") }
 			local hit = workspace:Raycast(cam.Position, cam.LookVector * 230, params)
 			if hit and (hit.Position - root.Position).Magnitude > 7 then
-				S.Grapple = hit.Position
-				local v = root.AssemblyLinearVelocity
-				root.AssemblyLinearVelocity = Vector3.new(v.X, math.max(v.Y, 13), v.Z)
+				if not S.Grounded and hit.Position.Y > root.Position.Y + 6 then
+					Movement.startSwing(root, hit.Position)
+				else
+					S.Grapple = hit.Position
+					local v = root.AssemblyLinearVelocity
+					root.AssemblyLinearVelocity = Vector3.new(v.X, math.max(v.Y, 13), v.Z)
+				end
 			else
 				say("Nothing to grapple in range", Color3.fromRGB(255, 200, 120))
 			end
 		else
-			if S.Grapple and not S.Grounded then
+			if (S.Grapple or S.Swing) and not S.Grounded then
 				S.FlipTime = 0.5
+			end
+			if S.Swing then
+				Movement.endSwing(root, true)
 			end
 			S.Grapple = nil
 		end
@@ -485,10 +519,22 @@ local function onDown(down)
 		return
 	end
 	local character, humanoid, root = charParts()
-	if not character or S.Grounded or S.Flying or S.Pounding or S.Intangible or S.Grapple or humanoid.SeatPart then
+	if not character or S.Flying or S.Pounding or S.Intangible or S.Grapple or humanoid.SeatPart then
 		return
 	end
 	if formId() == "Cannonbolt" then
+		return
+	end
+	if S.Grounded then
+		-- Sprint + crouch = slide.
+		local v = root.AssemblyLinearVelocity
+		local flat = Vector3.new(v.X, 0, v.Z)
+		if Input.held("Boost") and flat.Magnitude > 20 and S.Slide <= 0 then
+			S.Slide = 0.75
+			S.SlideDir = flat.Unit
+			S.SlideSpeed = flat.Magnitude * 1.35
+			S.EmoteTime = 0
+		end
 		return
 	end
 	if not groundBelow(root, humanoid, 5) then
@@ -544,6 +590,15 @@ local function onJumpRequest()
 		return
 	end
 	local f = formId()
+	if S.WallRun then
+		-- Kick off the wall you're running along.
+		local out = S.WallRun.Normal * 34
+		root.AssemblyLinearVelocity = Vector3.new(out.X + v.X * 0.5, jumpV, out.Z + v.Z * 0.5)
+		S.WallRun = nil
+		S.AirDashUsed = false
+		S.FlipTime = 0.5
+		return
+	end
 	if S.WallTimer > 0 and (not f or f == "XLR8") and not S.JustJumped then
 		local out = S.WallNormal * Config.Moves.WallJumpOut
 		root.AssemblyLinearVelocity = Vector3.new(out.X, jumpV * 0.95, out.Z)
@@ -594,7 +649,7 @@ local function updateFlight(dt, humanoid, root)
 	local v
 	if wishLen > 0.05 then
 		local wishDir = wish.Unit
-		local top = (boost and h.FlyBoost or h.FlySpeed) * wishLen - dir.Y * style.DiveGain
+		local top = (boost and h.FlyBoost or h.FlySpeed) * skills().Flight * wishLen - dir.Y * style.DiveGain
 		local slow = math.clamp(1 - spd / h.FlySpeed, 0, 1)
 		local turn = math.rad(style.TurnRate * (1 + 4 * slow) * (boost and 0.8 or 1)) * dt
 		local newDir = spd > 5 and rotateToward(dir, wishDir, turn) or wishDir
@@ -652,7 +707,8 @@ local function updateGlide(dt, root)
 	end
 	local camPitch = math.deg(math.asin(math.clamp(CameraRig.lookVector().Y, -1, 1)))
 	local pitch = math.rad(math.clamp(camPitch + 8, -55, 25))
-	S.GlideSpeed = math.clamp(S.GlideSpeed + (-math.sin(pitch) * G.DiveAccel - (S.GlideSpeed - G.Cruise) * 0.35) * dt, G.MinSpeed, G.MaxSpeed)
+	local aero = skills().Flight
+	S.GlideSpeed = math.clamp(S.GlideSpeed + (-math.sin(pitch) * G.DiveAccel - (S.GlideSpeed - G.Cruise * aero) * 0.35) * dt, G.MinSpeed, G.MaxSpeed * aero)
 	local mv = Input.move()
 	local travel = flat.Magnitude > 2 and yawOf(flat) or CameraRig.yaw()
 	local target = CameraRig.yaw() - mv.X * 40
@@ -697,6 +753,177 @@ local function updateWalls(root, humanoid)
 	end
 end
 
+-- Parkour --------------------------------------------------------------------------
+
+local function wallRay(root, dir, dist)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { player.Character, workspace:FindFirstChild("Shards"), workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("LocalFx") }
+	local hit = workspace:Raycast(root.Position, dir * dist, params)
+	if hit and math.abs(hit.Normal.Y) < 0.4 and hit.Instance.CanCollide then
+		return hit, params
+	end
+	return nil, params
+end
+
+local function flatUnit(v)
+	local f = Vector3.new(v.X, 0, v.Z)
+	return f.Magnitude > 1e-3 and f.Unit or Vector3.zero
+end
+
+-- Wall-climb (sprint into a wall), wall-run (sprint alongside one in the air),
+-- and mantling onto ledges. Returns true while it's driving the character.
+function Movement.updateParkour(dt, humanoid, root, f)
+	if (f and f.Id ~= "XLR8") or S.Grapple or S.Pounding or S.Dodge > 0 or S.Intangible then
+		S.WallRun = nil
+		S.Climb = false
+		return false
+	end
+	local boost = Input.held("Boost")
+	local v = root.AssemblyLinearVelocity
+	local flat = Vector3.new(v.X, 0, v.Z)
+	local mv = Input.move()
+	local cam = workspace.CurrentCamera.CFrame
+	local wish = flatUnit(cam.LookVector) * mv.Y + flatUnit(cam.RightVector) * mv.X
+	local reach = root.Size.X * 0.5
+
+	-- Climb straight up while sprinting into a wall (costs energy).
+	if boost and wish.Magnitude > 0.3 and S.Energy > 1 then
+		local hit = wallRay(root, wish.Unit, reach + 1.6)
+		if hit and wish.Unit:Dot(-hit.Normal) > 0.6 then
+			S.Climb = true
+			S.WallRun = nil
+			S.Energy = math.max(0, S.Energy - 18 * dt)
+			local n = flatUnit(hit.Normal)
+			drive(root, "Vector", Vector3.new(0, 26, 0) - n * 3, yawOf(-n))
+			humanoid.AutoRotate = false
+			return true
+		end
+	end
+	if S.Climb then
+		-- The wall ran out under us: vault over the top.
+		S.Climb = false
+		drive(root, nil)
+		root.AssemblyLinearVelocity = Vector3.new(0, 30, 0) + flatUnit(root.CFrame.LookVector) * 16
+		S.MantleCd = 0.4
+		return false
+	end
+	if S.Grounded then
+		S.WallRun = nil
+		return false
+	end
+
+	if S.WallRun then
+		local w = S.WallRun
+		w.Time = w.Time - dt
+		local hit = wallRay(root, -w.Normal, reach + 2.4)
+		if not boost or w.Time <= 0 or not hit then
+			S.WallRun = nil
+			drive(root, nil)
+			return false
+		end
+		local n = flatUnit(hit.Normal)
+		w.Normal = n
+		local along = w.Dir - n * w.Dir:Dot(n)
+		w.Dir = along.Magnitude > 0.1 and along.Unit or w.Dir
+		local k = w.Time / 1.4
+		drive(root, "Vector", w.Dir * w.Speed + Vector3.new(0, -6 + 12 * k, 0) - n * 2, yawOf(w.Dir))
+		humanoid.AutoRotate = false
+		return true
+	elseif boost and flat.Magnitude > 14 then
+		local right = flatUnit(root.CFrame.RightVector)
+		for _, side in ipairs({ 1, -1 }) do
+			local hit = wallRay(root, right * side, reach + 2)
+			if hit then
+				local n = flatUnit(hit.Normal)
+				local along = flat - n * flat:Dot(n)
+				if along.Magnitude > 8 then
+					S.WallRun = { Normal = n, Dir = along.Unit, Time = 1.4, Speed = math.max(flat.Magnitude, 34), Side = side }
+					S.WallSlide = 0
+					return true
+				end
+			end
+		end
+	end
+
+	-- Mantle: moving into a wall whose top is just above head height.
+	if S.MantleCd <= 0 and wish.Magnitude > 0.3 then
+		local hit, params = wallRay(root, wish.Unit, reach + 1.4)
+		if hit then
+			local high = root.Position + Vector3.new(0, 3.4 * scale(), 0)
+			if not workspace:Raycast(high, wish.Unit * (reach + 2), params) then
+				root.AssemblyLinearVelocity = Vector3.new(0, 32, 0) + wish.Unit * 14
+				S.MantleCd = 0.6
+			end
+		end
+	end
+	return false
+end
+
+-- Swinging (El Tigre's chain on anything above him): a real rope, pump along
+-- the arc, steer with the stick, let go to fling.
+function Movement.startSwing(root, point)
+	Movement.endSwing(root, false)
+	local anchor = Instance.new("Part")
+	anchor.Name = "SwingAnchor"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.Transparency = 1
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.CFrame = CFrame.new(point)
+	anchor.Parent = workspace:FindFirstChild("LocalFx") or workspace
+	local a1 = Instance.new("Attachment")
+	a1.Parent = anchor
+	local rope = Instance.new("RopeConstraint")
+	rope.Attachment0 = ensureMover(root).Att
+	rope.Attachment1 = a1
+	rope.Length = (point - root.Position).Magnitude
+	rope.Visible = true
+	rope.Thickness = 0.18
+	rope.Color = BrickColor.new("Light stone grey")
+	rope.Parent = anchor
+	S.Swing = { Anchor = anchor, Point = point, Rope = rope }
+	drive(root, nil)
+end
+
+function Movement.updateSwing(dt, root)
+	local sw = S.Swing
+	local v = root.AssemblyLinearVelocity
+	local toPoint = (sw.Point - root.Position).Unit
+	local tangent = v - toPoint * v:Dot(toPoint)
+	local mv = Input.move()
+	local cam = workspace.CurrentCamera.CFrame
+	local wish = flatUnit(cam.LookVector) * mv.Y + flatUnit(cam.RightVector) * mv.X
+	local accel = Vector3.zero
+	if tangent.Magnitude > 2 then
+		accel = tangent.Unit * 22
+	end
+	if wish.Magnitude > 0.2 then
+		accel = accel + wish.Unit * 18
+	end
+	root.AssemblyLinearVelocity = v + accel * dt
+	sw.Rope.Length = math.max(12, sw.Rope.Length - 6 * dt)
+	local m = ensureMover(root)
+	local flat = Vector3.new(v.X, 0, v.Z)
+	if flat.Magnitude > 2 then
+		m.Align.CFrame = CFrame.Angles(0, math.rad(yawOf(flat)), 0)
+		m.Align.MaxTorque = root.AssemblyMass * 5000
+	end
+end
+
+function Movement.endSwing(root, fling)
+	if not S.Swing then
+		return
+	end
+	S.Swing.Anchor:Destroy()
+	S.Swing = nil
+	if fling and root.Parent then
+		local v = root.AssemblyLinearVelocity
+		root.AssemblyLinearVelocity = v * 1.15 + Vector3.new(0, 14, 0)
+	end
+end
+
 local function step(dt)
 	local character, humanoid, root = charParts()
 	if not character then
@@ -722,11 +949,15 @@ local function step(dt)
 	S.WallTimer = S.WallTimer - dt
 	S.WallSlide = S.WallSlide - dt
 	S.FaceTime = (S.FaceTime or 0) - dt
+	S.MantleCd = S.MantleCd - dt
+	S.CounterAnim = math.max(0, S.CounterAnim - dt)
+	S.BlockAnim = math.max(0, S.BlockAnim - dt)
+	S.TakedownAnim = math.max(0, S.TakedownAnim - dt)
 	if S.Dodge > 0 then
 		S.Dodge = math.max(0, S.Dodge - dt)
 	end
 	if not S.Intangible and not S.Boosting and not S.Breath then
-		S.Energy = math.min(Config.Player.MaxEnergy, S.Energy + Config.Player.EnergyRegen * dt)
+		S.Energy = math.min(Movement.maxEnergy(), S.Energy + Config.Player.EnergyRegen * dt)
 	end
 	if humanoid.SeatPart then
 		if S.Flying then
@@ -830,14 +1061,44 @@ local function step(dt)
 		character:SetAttribute("WalkSpeedBase", humanoid.WalkSpeed)
 		base = humanoid.WalkSpeed
 	end
-	local walkTarget = (f and f.Walk or h.Walk) * (Input.held("Boost") and not f and 1.45 or 1) * (S.Scooter > 0 and 2.4 or 1)
+	local walkTarget = (f and f.Walk or h.Walk) * (Input.held("Boost") and not f and 1.45 or 1) * (S.Scooter > 0 and 2.4 or 1) * skills().Walk
 	humanoid.WalkSpeed = S.EmoteTime > 0 and 0 or walkTarget
 
 	-- Movement modes.
 	local canGlide = f and f.Glide or (not f and h.CanGlide)
+	if not S.Grounded and S.Slide > 0 then
+		S.Slide = 0
+	end
+	if S.Swing and (S.Grounded or S.Flying) then
+		Movement.endSwing(root, false)
+	end
 	if S.Flying then
 		S.Gliding = false
 		updateFlight(dt, humanoid, root)
+	elseif S.Lunge then
+		local m = S.Lunge.Model
+		S.Lunge.Time = S.Lunge.Time - dt
+		if not m.Parent or not m.PrimaryPart or S.Lunge.Time <= 0 then
+			S.Lunge = nil
+			drive(root, nil)
+		else
+			local to = m.PrimaryPart.Position - root.Position
+			local flat = Vector3.new(to.X, 0, to.Z)
+			if flat.Magnitude - m.PrimaryPart.Size.Y * 0.5 < 3.5 then
+				S.Lunge = nil
+				drive(root, nil)
+			else
+				drive(root, "Plane", flat.Unit * Config.Combat.LungeSpeed, yawOf(flat))
+			end
+		end
+	elseif S.Swing then
+		Movement.updateSwing(dt, root)
+	elseif S.Slide > 0 then
+		S.Slide = math.max(0, S.Slide - dt)
+		local k = S.Slide / 0.75
+		drive(root, "Plane", S.SlideDir * S.SlideSpeed * (0.6 + 0.4 * k), yawOf(S.SlideDir))
+	elseif Movement.updateParkour(dt, humanoid, root, f) then
+		-- wall-run / climb / mantle in control
 	elseif S.Pounding then
 		drive(root, "Vector", Vector3.new(0, -Config.Moves.PoundSpeed, 0), nil)
 	elseif S.Dodge > 0 then
@@ -912,6 +1173,8 @@ local function step(dt)
 		Emote = S.EmoteTime > 0, WallSlide = S.WallSlide > 0, Boosting = S.Boosting, Jetpack = S.Jetpack > 0,
 		Scooter = S.Scooter > 0, Intangible = S.Intangible, Takeoff = S.TakeoffTime > 0, Grapple = S.Grapple ~= nil,
 		Breath = S.Breath, DodgeSide = S.DodgeSide, FlyBank = math.floor(S.FlyBank + 0.5), FlyPitch = math.floor(S.FlyPitch + 0.5),
+		Slide = S.Slide > 0, WallRun = S.WallRun ~= nil, Climb = S.Climb, Swing = S.Swing ~= nil,
+		WallSide = S.WallRun and S.WallRun.Side or 0, Lunge = S.Lunge ~= nil,
 	}
 	local changed = false
 	for k, v in pairs(report) do
@@ -928,7 +1191,7 @@ local function step(dt)
 end
 
 function Movement.init(controllers)
-	Input, CameraRig, Hud = controllers.Input, controllers.CameraRig, controllers.Hud
+	Input, CameraRig, Hud, CombatAssist = controllers.Input, controllers.CameraRig, controllers.Hud, controllers.CombatAssist
 	Input.on("Sig", onSig)
 	Input.on("Sig2", onSig2)
 	Input.on("Ult", onUlt)

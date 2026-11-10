@@ -79,16 +79,88 @@ function Combat.isImmune(player)
 	return st.Hero == "Ben" and st.Omni:IsInvulnerable()
 end
 
-function Combat.damagePlayer(player, amount)
+function Combat.damagePlayer(player, amount, sourcePos)
 	local character, humanoid = charOf(player)
 	if not character or Combat.isImmune(player) then
 		return
 	end
-	humanoid:TakeDamage(amount)
-	regenAt[player] = os.clock() + Config.Player.RegenDelay
 	local st = PlayerState.get(player)
+	local now = os.clock()
+	if st.BlockUntil and now < st.BlockUntil then
+		amount = amount * (1 - Config.Combat.BlockReduce)
+		Net.fireAll("Fx", { Kind = "Block", Player = player })
+	end
+	humanoid:TakeDamage(amount)
+	regenAt[player] = now + Config.Player.RegenDelay
 	PlayerState.addMeter(st, amount * 0.25)
 	character:SetAttribute("HurtAt", workspace:GetServerTimeNow())
+	-- Getting hit breaks the combo.
+	st.Combo = 0
+	player:SetAttribute("Combo", 0)
+end
+
+-- Every landed hit grows the freeflow combo; it lapses after a few quiet seconds.
+function Combat.registerHit(player)
+	local st = PlayerState.get(player)
+	if not st then
+		return
+	end
+	local now = os.clock()
+	if now - (st.ComboAt or 0) > Config.Combat.ComboTimeout then
+		st.Combo = 0
+	end
+	st.Combo = (st.Combo or 0) + 1
+	st.ComboAt = now
+	player:SetAttribute("Combo", st.Combo)
+	player:SetAttribute("ComboAt", workspace:GetServerTimeNow())
+end
+
+local function onCounter(player)
+	local st = PlayerState.get(player)
+	local character, _, root = charOf(player)
+	if not st or not character or not canAttack(st, character) then
+		return
+	end
+	if not PlayerState.ready(st, "Counter", Config.Combat.CounterCooldown) then
+		return
+	end
+	local countered = Enemies.counter(player, root.Position)
+	if countered > 0 then
+		st.DodgeUntil = math.max(st.DodgeUntil, os.clock() + Config.Combat.CounterImmunity)
+		character:SetAttribute("CounterAt", workspace:GetServerTimeNow())
+		Net.fireAll("Fx", { Kind = "Counter", Player = player, Pos = root.Position, Count = countered })
+	else
+		st.BlockUntil = os.clock() + Config.Combat.BlockTime
+		character:SetAttribute("BlockAt", workspace:GetServerTimeNow())
+	end
+end
+
+local function onTakedown(player)
+	local st = PlayerState.get(player)
+	local character, _, root = charOf(player)
+	if not st or not character or not canAttack(st, character) then
+		return
+	end
+	if os.clock() - (st.ComboAt or 0) > Config.Combat.ComboTimeout or (st.Combo or 0) < Config.Combat.TakedownCombo then
+		return
+	end
+	local best, bestDist = nil, Config.Combat.TakedownRange
+	for _, e in ipairs(Enemies.list()) do
+		if e.Health > 0 and e.Model.Parent then
+			local d = (e.Root.Position - root.Position).Magnitude - e.Radius
+			if d < bestDist then
+				best, bestDist = e, d
+			end
+		end
+	end
+	if not best then
+		return
+	end
+	st.Combo = st.Combo - Config.Combat.TakedownCombo
+	player:SetAttribute("Combo", st.Combo)
+	Net.fireAll("Fx", { Kind = "Takedown", Player = player, Pos = best.Root.Position, Model = best.Model })
+	local amount = best.IsBoss and 250 or best.Health + 1
+	Enemies.damage(best, amount, Vector3.new(0, 60, 0), player, { Posture = 2 })
 end
 
 local function hitEnemiesInSphere(center, radius, damage, knockScale, attacker, alreadyHit)
@@ -96,7 +168,7 @@ local function hitEnemiesInSphere(center, radius, damage, knockScale, attacker, 
 	for _, e in ipairs(Enemies.list()) do
 		if e.Health > 0 and e.Root.Parent and not (alreadyHit and alreadyHit[e]) then
 			local to = e.Root.Position - center
-			if to.Magnitude < radius + 1.6 then
+			if to.Magnitude < radius + e.Radius then
 				if alreadyHit then
 					alreadyHit[e] = true
 				end
@@ -193,7 +265,7 @@ local function stepProjectiles(dt)
 				local rel = e.Root.Position - shot.Pos
 				local along = math.clamp(rel:Dot(move.Unit), 0, move.Magnitude)
 				local closest = shot.Pos + move.Unit * along
-				if (e.Root.Position - closest).Magnitude < shot.Radius + 1.8 then
+				if (e.Root.Position - closest).Magnitude < shot.Radius + e.Radius + 0.2 then
 					local dir = shot.Vel.Unit
 					Enemies.damage(e, shot.Damage, dir * 40 * shot.Knock + Vector3.new(0, 15 * shot.Knock, 0), shot.Owner)
 					endShot(shot, closest)
@@ -267,9 +339,9 @@ local function onAttack(player, aim)
 				local to = e.Root.Position - root.Position
 				local flat = Vector3.new(to.X, 0, to.Z)
 				local inFront = flat.Magnitude < 0.01 or flat.Unit:Dot(flatAim) > (finisher and -1.1 or 0.2)
-				if flat.Magnitude < range + 2.5 * scale and math.abs(to.Y) < 6 * scale and inFront then
+				if flat.Magnitude < range + 2.5 * scale + e.Radius and math.abs(to.Y) < 6 * scale + e.Radius and inFront then
 					local dir = flat.Magnitude > 0.01 and flat.Unit or flatAim
-					Enemies.damage(e, a.Damage * dmg, dir * (a.Knockback or 40) * knock * 0.6 + Vector3.new(0, (a.Knockback or 40) * knock * 0.3, 0), player)
+					Enemies.damage(e, a.Damage * dmg, dir * (a.Knockback or 40) * knock * 0.6 + Vector3.new(0, (a.Knockback or 40) * knock * 0.3, 0), player, { Melee = true, Posture = finisher and 1.6 or 1 })
 					hits = hits + 1
 				end
 			end
@@ -296,7 +368,7 @@ local function coneDamage(player, root, aim, range, halfAngle, damage, knock)
 		if e.Health > 0 and e.Root.Parent then
 			local to = e.Root.Position - root.Position
 			local d = to.Magnitude
-			if d < range and d > 0.1 and to.Unit:Dot(aim) > cosHalf then
+			if d < range + e.Radius and d > 0.1 and to.Unit:Dot(aim) > cosHalf then
 				Enemies.damage(e, damage, to.Unit * knock + Vector3.new(0, knock * 0.3, 0), player)
 				hits = hits + 1
 			end
@@ -430,6 +502,8 @@ function Combat.init(systems)
 	Net.on("Attack", 20, onAttack)
 	Net.on("Ability", 10, onAbility)
 	Net.on("Pound", 3, onPound)
+	Net.on("Counter", 6, onCounter)
+	Net.on("Takedown", 3, onTakedown)
 end
 
 function Combat.start()

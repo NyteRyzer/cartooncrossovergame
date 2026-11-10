@@ -13,7 +13,7 @@ local Debris = game:GetService("Debris")
 
 local Effects = {}
 local player = Players.LocalPlayer
-local Hud, CameraRig, Movement
+local Hud, CameraRig, Movement, CombatAssist
 local fxFolder
 local shots = {}        -- [id] = { Part, Vel, Life }
 local takenShards = {}  -- [id] = true
@@ -183,8 +183,69 @@ local function onFx(fx)
 		if shard then
 			shard.Parent = nil -- hidden for this player only
 		end
-		Effects.burst(fx.Pos, Color3.fromRGB(190, 130, 255), 30)
-		Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 8, 0.4, Color3.fromRGB(120, 230, 255))
+		if not fx.Silent then
+			Effects.burst(fx.Pos, Color3.fromRGB(190, 130, 255), 30)
+			Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 8, 0.4, Color3.fromRGB(120, 230, 255))
+		end
+	elseif kind == "Telegraph" then
+		if CombatAssist then
+			CombatAssist.onTelegraph(fx)
+		end
+	elseif kind == "Stagger" then
+		local model = fx.Model
+		if model and model.Parent then
+			local h = Instance.new("Highlight")
+			h.FillColor = Color3.fromRGB(255, 220, 60)
+			h.FillTransparency = 0.4
+			h.OutlineColor = Color3.new(1, 1, 1)
+			h.Parent = model
+			Debris:AddItem(h, 2.5)
+			local gui = Instance.new("BillboardGui")
+			gui.Size = UDim2.fromOffset(160, 36)
+			gui.StudsOffset = Vector3.new(0, (model.PrimaryPart and model.PrimaryPart.Size.Y or 3) * 0.7 + 2, 0)
+			gui.AlwaysOnTop = true
+			gui.Adornee = model.PrimaryPart
+			local l = Instance.new("TextLabel")
+			l.BackgroundTransparency = 1
+			l.Size = UDim2.fromScale(1, 1)
+			l.Font = Enum.Font.FredokaOne
+			l.TextScaled = true
+			l.Text = "STAGGERED - FINISH IT!"
+			l.TextColor3 = Color3.fromRGB(255, 220, 60)
+			l.TextStrokeTransparency = 0
+			l.Parent = gui
+			gui.Parent = player:WaitForChild("PlayerGui")
+			Debris:AddItem(gui, 2.5)
+		end
+		Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 9, 0.35, Color3.fromRGB(255, 220, 60))
+	elseif kind == "Finisher" or kind == "Takedown" then
+		Effects.burst(fx.Pos, Color3.fromRGB(255, 230, 120), 50, true)
+		Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 16, 0.45, Color3.new(1, 1, 1))
+		if fx.Attacker == player or fx.Player == player then
+			CameraRig.shake(0.9)
+			if CameraRig.punch then
+				CameraRig.punch()
+			end
+		end
+	elseif kind == "Counter" then
+		Effects.ring(fx.Pos, Vector3.new(0, 1, 0), 14, 0.3, Color3.fromRGB(120, 220, 255))
+		Effects.burst(fx.Pos + Vector3.new(0, 2, 0), Color3.fromRGB(180, 240, 255), 20)
+		if fx.Player == player then
+			CameraRig.shake(0.4)
+		end
+	elseif kind == "Block" then
+		local character = fx.Player and fx.Player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root then
+			Effects.burst(root.Position + root.CFrame.LookVector * 2, Color3.fromRGB(255, 240, 200), 8)
+		end
+	elseif kind == "Deflect" then
+		local d = fx.To - fx.From
+		local p = part({ Size = Vector3.new(0.4, 0.4, d.Magnitude), Color = Color3.fromRGB(120, 220, 255), CFrame = CFrame.lookAt(fx.From + d / 2, fx.To) })
+		TweenService:Create(p, TweenInfo.new(0.3), { Transparency = 1 }):Play()
+		Debris:AddItem(p, 0.35)
+	elseif kind == "Reward" then
+		Hud.reward(fx.Xp, fx.Cash, fx.Reason)
 	elseif kind == "Gate" then
 		if Effects.lastGate and Effects.lastGate.Parent then
 			for _, d in ipairs(Effects.lastGate:GetDescendants()) do
@@ -290,7 +351,7 @@ local function updateMarker()
 end
 
 function Effects.init(controllers)
-	Hud, CameraRig, Movement = controllers.Hud, controllers.CameraRig, controllers.Movement
+	Hud, CameraRig, Movement, CombatAssist = controllers.Hud, controllers.CameraRig, controllers.Movement, controllers.CombatAssist
 	Movement.onBoom = function(pos, dir)
 		Effects.ring(pos, dir, 10, 0.45, Color3.fromRGB(235, 245, 255))
 	end

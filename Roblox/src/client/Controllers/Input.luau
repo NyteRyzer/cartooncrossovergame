@@ -29,6 +29,10 @@ local ACTIONS = {
 	Glitch = { { Enum.KeyCode.G }, nil },
 	Recall = { { Enum.KeyCode.P, Enum.KeyCode.DPadDown }, nil },
 	Help = { { Enum.KeyCode.F1 }, nil },
+	Counter = { { Enum.UserInputType.MouseButton2, Enum.KeyCode.X, Enum.KeyCode.ButtonR1 }, "Counter" },
+	Takedown = { { Enum.KeyCode.T, Enum.KeyCode.DPadLeft }, "Takedown" },
+	LockOn = { { Enum.KeyCode.Z, Enum.UserInputType.MouseButton3, Enum.KeyCode.ButtonR3 }, nil },
+	Skills = { { Enum.KeyCode.K, Enum.KeyCode.ButtonSelect }, nil },
 }
 
 local function emit(name, down)
@@ -69,7 +73,10 @@ function Input.init()
 	end
 	-- Lay out the touch buttons in an arc above the jump button.
 	if UserInputService.TouchEnabled then
-		local spots = { Attack = { 0.62, 0.48 }, Sig = { 0.72, 0.36 }, Sig2 = { 0.84, 0.30 }, Ult = { 0.52, 0.62 }, Fly = { 0.52, 0.30 }, Dodge = { 0.62, 0.20 }, Down = { 0.40, 0.55 } }
+		local spots = {
+			Attack = { 0.62, 0.48 }, Sig = { 0.72, 0.36 }, Sig2 = { 0.84, 0.30 }, Ult = { 0.52, 0.62 }, Fly = { 0.52, 0.30 },
+			Dodge = { 0.62, 0.20 }, Down = { 0.40, 0.55 }, Counter = { 0.74, 0.62 }, Takedown = { 0.40, 0.25 },
+		}
 		for name, p in pairs(spots) do
 			ContextActionService:SetPosition("MT_" .. name, UDim2.new(p[1], 0, p[2], 0))
 		end

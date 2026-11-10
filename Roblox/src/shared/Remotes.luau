@@ -13,6 +13,12 @@ return {
 		"Fx",           -- server -> clients: visual effects
 		"Notify",       -- server -> client: messages, banners
 		"OpenTerminal", -- server -> client: show the hero/travel menu
+		"Counter",      -- client: counter / parry (or block)
+		"Takedown",     -- client: special takedown (needs a high combo)
+		"Skill",        -- client: spend a skill point
+		"Shop",         -- client: buy an item at the Gear Locker
+		"OpenShop",     -- server -> client: show the shop
+		"Objective",    -- server -> client: mission objective / waypoint
 	},
 	Functions = {},
 }

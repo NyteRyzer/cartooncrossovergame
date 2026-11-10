@@ -175,4 +175,74 @@ Config.Shards = { Retroville = 24, Nexus = 10, Reach = 6, Health = 15, Meter = 1
 -- Names of the map folders built into Workspace by Roblox/tools/build_place.py.
 Config.Levels = { Nexus = "NexusObservatory", Retroville = "Retroville" }
 
+-- ---------------------------------------------------------------------------
+-- Combat 2.0: freeflow counters, posture/stagger and finishers, takedowns,
+-- lock-on and lunges (in the spirit of the Arkham, Spider-Man, Sekiro and
+-- Doom-style finisher games), enemy types and the Rift Titan boss.
+-- ---------------------------------------------------------------------------
+Config.Combat = {
+	CounterRange = 16,      -- enemies winding up this close can be countered
+	CounterDamage = 15,
+	CounterImmunity = 0.45,
+	BlockTime = 0.5,        -- a counter with nothing to counter becomes a block
+	BlockReduce = 0.7,      -- damage taken while blocking is reduced by this much
+	CounterCooldown = 0.45,
+	ComboTimeout = 2.5,     -- seconds without landing a hit before the combo drops
+	TakedownCombo = 8,      -- combo needed for a special takedown
+	TakedownRange = 26,
+	StaggerTime = 2.5,      -- posture broken: open to a finisher
+	FinisherHeal = 20,
+	PostureDecay = 12,      -- per second, after 2 s without being hit
+	LockRange = 75,
+	LungeRange = 30,
+	LungeSpeed = 75,
+}
+
+Config.EnemyTypes = {
+	Gremlin = { Health = 40, Speed = 14, Damage = 8, Posture = 60, Windup = 0.6, Reach = 6, Size = 3.2,
+		Color = rgb(170, 80, 230), Xp = 10, Cash = 5, Heat = 0.12 },
+	Brute = { Health = 170, Speed = 9, Damage = 18, Posture = 150, Windup = 0.95, Reach = 10, Size = 6.5,
+		Color = rgb(150, 40, 60), Xp = 35, Cash = 20, Heat = 0.35, Slam = 13 },
+	Spitter = { Health = 30, Speed = 12, Damage = 10, Posture = 40, Windup = 0.8, Reach = 70, Size = 2.6,
+		Color = rgb(90, 200, 90), Xp = 15, Cash = 8, Heat = 0.15, Ranged = true, KeepAway = 35 },
+	Hunter = { Health = 70, Speed = 22, Damage = 10, Posture = 80, Windup = 0.5, Reach = 6, Size = 3.4,
+		Color = rgb(70, 110, 170), Xp = 20, Cash = 12, Heat = 0.04 },
+}
+
+Config.Boss = {
+	Name = "Rift Titan", Health = 3000, PerExtraPlayer = 0.5, Size = 22, Speed = 10, Posture = 700,
+	StompDamage = 22, StompRadius = 70, ChargeDamage = 25, SpitDamage = 14, Xp = 600, Cash = 400,
+	Color = rgb(110, 40, 160),
+}
+
+-- ---------------------------------------------------------------------------
+-- Progression (levels, skills, cash), wanted level, missions, the shop.
+-- ---------------------------------------------------------------------------
+Config.Progression = { XpBase = 100, XpGrowth = 1.22, MaxLevel = 50, SkillPrice = 250, SkillPriceGrowth = 1.5 }
+
+Config.SkillOrder = { "Vitality", "Power", "Reserves", "Aero", "Agility", "Focus" }
+Config.Skills = {
+	Vitality = { Max = 5, Name = "Vitality", Desc = "+12 max health per rank" },
+	Power = { Max = 5, Name = "Power", Desc = "+8% damage per rank" },
+	Reserves = { Max = 5, Name = "Reserves", Desc = "+15 max energy per rank" },
+	Aero = { Max = 5, Name = "Aerodynamics", Desc = "+8% flight and glide speed per rank" },
+	Agility = { Max = 5, Name = "Agility", Desc = "+6% run speed per rank" },
+	Focus = { Max = 5, Name = "Focus", Desc = "+12% ultimate charge per rank" },
+}
+
+Config.Shop = {
+	{ Id = "Medkit", Name = "Health Pack", Desc = "Heal 60 health now", Price = 30 },
+	{ Id = "Charge", Name = "Ultimate Charge", Desc = "+50 ultimate meter", Price = 70 },
+	{ Id = "SkillPoint", Name = "Skill Point", Desc = "One extra skill point (price rises)", Price = 250 },
+}
+
+-- Wanted level ("threat"): chaos raises it, hunter squads come after you,
+-- break line of sight and lie low to shake them.
+Config.Heat = {
+	Max = 5, DecayDelay = 10, DecayPerSecond = 0.12, NearRange = 110,
+	SquadInterval = { 30, 22, 17, 13, 10 }, SquadSize = { 2, 3, 4, 5, 6 },
+}
+
+Config.DayLengthSeconds = 720
+
 return Config

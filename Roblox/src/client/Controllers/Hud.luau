@@ -13,11 +13,14 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local MapData = require(Shared:WaitForChild("MapData"))
+local Rules = require(Shared:WaitForChild("Progression"))
 
 local Hud = {}
 local player = Players.LocalPlayer
-local Input, CameraRig, Movement
+local Input, CameraRig, Movement, Minimap
 local gui, card, bars, info, msgFrame, banner, combo, menu, dial, help
+local stats, stars, bossBar, missionPanel, prompts, skillsMenu, shopMenu, rewardFeed
+local mission = nil
 local dialIsOpen = false
 local comboCount, comboTimer = 0, 0
 local FONT = Enum.Font.FredokaOne
@@ -237,7 +240,7 @@ local function build()
 	label(dial, "OMNITRIX: 1/2/3 to transform, Q to cancel", UDim2.new(1, -60, 0, 24), UDim2.new(0, 30, 1, -40), Color3.fromRGB(200, 255, 200), Enum.TextXAlignment.Center)
 
 	-- Controls overlay.
-	help = new("Frame", { BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.4, Size = UDim2.fromOffset(820, 196), Position = UDim2.new(0.5, -410, 1, -400), BorderSizePixel = 0 }, gui)
+	help = new("Frame", { BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.4, Size = UDim2.fromOffset(840, 228), Position = UDim2.new(0.5, -420, 1, -430), BorderSizePixel = 0 }, gui)
 	corner(help, 0.06)
 	local lines = {
 		"CONTROLS  (F1 to toggle)",
@@ -246,6 +249,7 @@ local function build()
 		"V or Alt dodge / air dash / barrel roll   Ctrl in the air: ground pound   B emote   Hold Space falling: glide (Aang)",
 		"E terminals (swap hero / travel) and Jimmy's hover car   P return to the Nexus   M (or Esc) free the mouse",
 		"Ben: 1/2/3 transform, Q Omnitrix dial, G Master Control Glitch, F Way Big (full meter)",
+		"Right click / X counter (on a red !)   T takedown (8+ combo)   Z lock-on   K skills   Shift: wall-run, climb, slide (+Ctrl)",
 	}
 	for i, text in ipairs(lines) do
 		label(help, text, UDim2.new(1, -24, 0, 22), UDim2.fromOffset(12, 8 + (i - 1) * 30), i == 1 and Color3.fromRGB(255, 230, 120) or Color3.new(1, 1, 1))
@@ -253,6 +257,193 @@ local function build()
 	task.delay(14, function()
 		help.Visible = false
 	end)
+end
+
+-- Cash, level, XP, wanted stars, boss bar, mission timer.
+local function refreshExtras()
+	local level = player:GetAttribute("Level") or 1
+	local xp = player:GetAttribute("Xp") or 0
+	local need = Rules.xpToNext(level, Config)
+	stats.Level.Text = ("LV %d"):format(level)
+	stats.Cash.Text = ("$%d"):format(player:GetAttribute("Cash") or 0)
+	local points = player:GetAttribute("SkillPoints") or 0
+	stats.Points.Text = points > 0 and ("%d skill point%s (K)"):format(points, points > 1 and "s" or "") or ""
+	stats.XpFill.Size = UDim2.fromScale(math.clamp(xp / need, 0, 1), 1)
+	local heat = player:GetAttribute("Heat") or 0
+	local cooling = player:GetAttribute("HeatCooling")
+	local n = math.floor(heat)
+	local blink = cooling and (os.clock() % 0.6 < 0.3)
+	for i, star in ipairs(stars) do
+		star.TextColor3 = i <= n and Color3.fromRGB(255, 215, 60) or Color3.fromRGB(70, 70, 80)
+		star.TextTransparency = (i <= n and blink) and 0.7 or (n > 0 and 0 or 1)
+		star.TextStrokeTransparency = n > 0 and 0.3 or 1
+	end
+	local bossOn = workspace:GetAttribute("BossActive")
+	bossBar.Visible = bossOn == true
+	if bossOn then
+		local hp, max = workspace:GetAttribute("BossHealth") or 0, workspace:GetAttribute("BossMax") or 1
+		bossBar.Fill.Size = UDim2.fromScale(math.clamp(hp / max, 0, 1), 1)
+		bossBar.Title.Text = (workspace:GetAttribute("BossName") or "Boss") .. ("  %d / %d"):format(hp, max)
+	end
+	if mission then
+		local left = math.max(0, mission.Ends - workspace:GetServerTimeNow())
+		missionPanel.Visible = true
+		missionPanel.Title.Text = ("%s   %d:%02d"):format(mission.Name, math.floor(left / 60), math.floor(left % 60))
+		missionPanel.Body.Text = mission.Text or ""
+	else
+		missionPanel.Visible = false
+	end
+end
+
+function Hud.setPrompts(threat, takedown)
+	if not prompts then
+		return
+	end
+	prompts.Counter.Visible = threat
+	prompts.Counter.TextTransparency = (os.clock() % 0.25 < 0.12) and 0 or 0.25
+	prompts.Takedown.Visible = takedown
+end
+
+function Hud.reward(xp, cash, reason)
+	if not rewardFeed then
+		return
+	end
+	local parts = {}
+	if xp and xp > 0 then
+		table.insert(parts, "+" .. xp .. " XP")
+	end
+	if cash and cash > 0 then
+		table.insert(parts, "+$" .. cash)
+	end
+	if #parts == 0 then
+		return
+	end
+	local l = label(rewardFeed, table.concat(parts, "   ") .. (reason and ("  " .. reason) or ""), UDim2.new(1, 0, 0, 20), UDim2.new(), Color3.fromRGB(255, 225, 120), Enum.TextXAlignment.Right)
+	l.LayoutOrder = math.floor(os.clock() * 100)
+	task.delay(2.5, function()
+		TweenService:Create(l, TweenInfo.new(0.4), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		task.wait(0.45)
+		l:Destroy()
+	end)
+end
+
+function Hud.setMission(m)
+	mission = m
+	if Minimap then
+		Minimap.setWaypoint(m and m.Pos or nil)
+	end
+end
+
+local function menuFrame(name, title, height)
+	local f = new("Frame", { Name = name, Visible = false, BackgroundColor3 = Color3.fromRGB(15, 15, 30), BackgroundTransparency = 0.12, Size = UDim2.fromOffset(520, height), Position = UDim2.new(0.5, -260, 0.5, -height / 2), BorderSizePixel = 0 }, gui)
+	corner(f, 0.05)
+	label(f, title, UDim2.new(1, -40, 0, 34), UDim2.fromOffset(20, 10), Color3.fromRGB(255, 230, 120), Enum.TextXAlignment.Center)
+	local list = new("Frame", { Name = "List", BackgroundTransparency = 1, Size = UDim2.new(1, -40, 1, -110), Position = UDim2.fromOffset(20, 52) }, f)
+	new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+	local close = new("TextButton", { Text = "Close", BackgroundColor3 = Color3.fromRGB(80, 80, 100), TextColor3 = Color3.new(1, 1, 1), Font = FONT, TextScaled = true, Size = UDim2.fromOffset(140, 32), Position = UDim2.new(0.5, -70, 1, -44), BorderSizePixel = 0 }, f)
+	corner(close, 0.3)
+	close.Activated:Connect(function()
+		f.Visible = false
+		Input.setEnabled(true)
+		CameraRig.setCursorFree(false)
+	end)
+	return f
+end
+
+local function row(list, order, text, button, onClick)
+	local r = new("Frame", { BackgroundColor3 = Color3.fromRGB(40, 40, 60), BackgroundTransparency = 0.2, Size = UDim2.new(1, 0, 0, 44), LayoutOrder = order, BorderSizePixel = 0 }, list)
+	corner(r, 0.2)
+	label(r, text, UDim2.new(1, -150, 1, -8), UDim2.fromOffset(10, 4))
+	local b = new("TextButton", { Text = button, Font = FONT, TextScaled = true, BackgroundColor3 = Color3.fromRGB(255, 200, 80), Size = UDim2.fromOffset(120, 32), Position = UDim2.new(1, -128, 0, 6), BorderSizePixel = 0 }, r)
+	corner(b, 0.3)
+	b.Activated:Connect(onClick)
+	return r
+end
+
+local function openSkills()
+	for _, c in ipairs(skillsMenu.List:GetChildren()) do
+		if c:IsA("Frame") then
+			c:Destroy()
+		end
+	end
+	local points = player:GetAttribute("SkillPoints") or 0
+	skillsMenu:FindFirstChildOfClass("TextLabel").Text = ("SKILLS  -  %d point%s to spend"):format(points, points == 1 and "" or "s")
+	for i, id in ipairs(Config.SkillOrder) do
+		local def = Config.Skills[id]
+		local rank = player:GetAttribute("Skill_" .. id) or 0
+		row(skillsMenu.List, i, ("%s  %d/%d\n%s"):format(def.Name, rank, def.Max, def.Desc), rank >= def.Max and "MAX" or "+1", function()
+			ReplicatedStorage.Remotes.Skill:FireServer(id)
+			task.delay(0.3, openSkills)
+		end)
+	end
+	skillsMenu.Visible = true
+	Input.setEnabled(false)
+	CameraRig.setCursorFree(true)
+end
+
+local function openShop(prices)
+	for _, c in ipairs(shopMenu.List:GetChildren()) do
+		if c:IsA("Frame") then
+			c:Destroy()
+		end
+	end
+	for i, item in ipairs(Config.Shop) do
+		local price = prices and prices[item.Id] or item.Price
+		row(shopMenu.List, i, ("%s  -  $%d\n%s"):format(item.Name, price, item.Desc), "Buy", function()
+			ReplicatedStorage.Remotes.Shop:FireServer(item.Id)
+		end)
+	end
+	shopMenu.Visible = true
+	Input.setEnabled(false)
+	CameraRig.setCursorFree(true)
+end
+
+local function buildExtras()
+	-- Level / XP / cash under the hero card.
+	stats = new("Frame", { BackgroundColor3 = Color3.fromRGB(15, 15, 25), BackgroundTransparency = 0.35, Size = UDim2.fromOffset(330, 46), Position = UDim2.fromOffset(16, 122), BorderSizePixel = 0 }, gui)
+	corner(stats, 0.2)
+	local lv = label(stats, "LV 1", UDim2.fromOffset(70, 24), UDim2.fromOffset(10, 4), Color3.fromRGB(255, 230, 120))
+	lv.Name = "Level"
+	local cash = label(stats, "$0", UDim2.fromOffset(110, 24), UDim2.fromOffset(84, 4), Color3.fromRGB(140, 255, 160))
+	cash.Name = "Cash"
+	local pts = label(stats, "", UDim2.fromOffset(140, 18), UDim2.fromOffset(184, 7), Color3.fromRGB(255, 200, 90))
+	pts.Name = "Points"
+	local xpBack = new("Frame", { BackgroundColor3 = Color3.fromRGB(30, 30, 45), Size = UDim2.new(1, -20, 0, 8), Position = UDim2.fromOffset(10, 32), BorderSizePixel = 0 }, stats)
+	corner(xpBack, 0.5)
+	stats.XpFill = new("Frame", { BackgroundColor3 = Color3.fromRGB(255, 210, 80), Size = UDim2.fromScale(0, 1), BorderSizePixel = 0 }, xpBack)
+	corner(stats.XpFill, 0.5)
+	-- Wanted stars, top centre.
+	local starRow = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(200, 34), Position = UDim2.new(0.5, -100, 0, 12) }, gui)
+	new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center }, starRow)
+	stars = {}
+	for i = 1, Config.Heat.Max do
+		local s = label(starRow, "★", UDim2.fromOffset(34, 34), UDim2.new(), Color3.fromRGB(70, 70, 80), Enum.TextXAlignment.Center)
+		s.LayoutOrder = i
+		stars[i] = s
+	end
+	-- Boss bar.
+	bossBar = new("Frame", { Visible = false, BackgroundColor3 = Color3.fromRGB(20, 10, 30), BackgroundTransparency = 0.2, Size = UDim2.new(0.5, 0, 0, 22), Position = UDim2.new(0.25, 0, 0, 56), BorderSizePixel = 0 }, gui)
+	corner(bossBar, 0.4)
+	bossBar.Fill = new("Frame", { BackgroundColor3 = Color3.fromRGB(230, 60, 180), Size = UDim2.fromScale(1, 1), BorderSizePixel = 0 }, bossBar)
+	corner(bossBar.Fill, 0.4)
+	bossBar.Title = label(bossBar, "", UDim2.new(1, -10, 1, 0), UDim2.fromOffset(5, 0), Color3.new(1, 1, 1), Enum.TextXAlignment.Center)
+	bossBar.Title.ZIndex = 3
+	-- Mission panel.
+	missionPanel = new("Frame", { Visible = false, BackgroundColor3 = Color3.fromRGB(15, 15, 25), BackgroundTransparency = 0.3, Size = UDim2.fromOffset(330, 62), Position = UDim2.fromOffset(16, 176), BorderSizePixel = 0 }, gui)
+	corner(missionPanel, 0.15)
+	missionPanel.Title = label(missionPanel, "", UDim2.new(1, -16, 0, 26), UDim2.fromOffset(8, 4), Color3.fromRGB(255, 220, 90))
+	missionPanel.Body = label(missionPanel, "", UDim2.new(1, -16, 0, 22), UDim2.fromOffset(8, 34), Color3.new(1, 1, 1))
+	-- Combat prompts.
+	prompts = {}
+	prompts.Counter = label(gui, "COUNTER! (Right click / X)", UDim2.fromOffset(360, 40), UDim2.new(0.5, -180, 0.5, 60), Color3.fromRGB(255, 80, 80), Enum.TextXAlignment.Center)
+	prompts.Counter.Visible = false
+	prompts.Takedown = label(gui, "TAKEDOWN READY (T)", UDim2.fromOffset(300, 30), UDim2.new(0.5, -150, 0.5, 104), Color3.fromRGB(255, 220, 90), Enum.TextXAlignment.Center)
+	prompts.Takedown.Visible = false
+	-- Reward feed (right side, under world info).
+	rewardFeed = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(320, 140), Position = UDim2.new(1, -336, 0, 140) }, gui)
+	new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Right }, rewardFeed)
+	skillsMenu = menuFrame("SkillsMenu", "SKILLS", 420)
+	shopMenu = menuFrame("ShopMenu", "GEAR LOCKER", 300)
 end
 
 local function refresh(dt)
@@ -270,7 +461,7 @@ local function refresh(dt)
 	card.Portrait.Initial.Text = heroId:sub(1, 1)
 	setBar(bars.Health, humanoid.Health / humanoid.MaxHealth, ("  %d"):format(humanoid.Health))
 	local S = Movement.state()
-	setBar(bars.Energy, S.Energy / Config.Player.MaxEnergy)
+	setBar(bars.Energy, S.Energy / Movement.maxEnergy())
 	local meter = character:GetAttribute("Meter") or 0
 	setBar(bars.Meter, meter / 100, meter >= 100 and "  READY (F)" or ("  %d%%"):format(meter))
 	if heroId == "Ben" then
@@ -288,12 +479,12 @@ local function refresh(dt)
 	info.Shards.Text = ("Rift shards: %d/%d"):format(player:GetAttribute("Shards_" .. levelName) or 0, workspace:GetAttribute("ShardTotal_" .. levelName) or 0)
 	info.Kills.Text = ("KOs: %d"):format(player:GetAttribute("Kills") or 0)
 
-	comboTimer = comboTimer - dt
-	if comboTimer <= 0 then
-		comboCount = 0
-	end
-	combo.Text = comboCount >= 2 and (comboCount .. " HIT COMBO!") or ""
-	combo.TextTransparency = 1 - math.clamp(comboTimer / 0.5, 0, 1)
+	local c = player:GetAttribute("Combo") or 0
+	local age = workspace:GetServerTimeNow() - (player:GetAttribute("ComboAt") or 0)
+	local fade = math.clamp((Config.Combat.ComboTimeout - age) / 0.5, 0, 1)
+	combo.Text = (c >= 2 and fade > 0) and (c .. " HIT COMBO!") or ""
+	combo.TextTransparency = 1 - fade
+	refreshExtras()
 end
 
 function Hud.setCourse(text)
@@ -303,8 +494,20 @@ function Hud.setCourse(text)
 end
 
 function Hud.init(controllers)
-	Input, CameraRig, Movement = controllers.Input, controllers.CameraRig, controllers.Movement
+	Input, CameraRig, Movement, Minimap = controllers.Input, controllers.CameraRig, controllers.Movement, controllers.Minimap
 	build()
+	buildExtras()
+	Input.on("Skills", function(down)
+		if down then
+			if skillsMenu.Visible then
+				skillsMenu.Visible = false
+				Input.setEnabled(true)
+				CameraRig.setCursorFree(false)
+			else
+				openSkills()
+			end
+		end
+	end)
 	Input.on("Help", function(down)
 		if down then
 			help.Visible = not help.Visible
@@ -326,6 +529,23 @@ function Hud.start()
 		end
 	end)
 	remotes.OpenTerminal.OnClientEvent:Connect(openMenu)
+	remotes.OpenShop.OnClientEvent:Connect(function(info)
+		if type(info) ~= "table" then
+			return
+		end
+		if info.Skills then
+			openSkills()
+		else
+			openShop(info.Prices)
+		end
+	end)
+	remotes.Objective.OnClientEvent:Connect(function(o)
+		if type(o) ~= "table" or o.Clear then
+			Hud.setMission(nil)
+		else
+			Hud.setMission(o)
+		end
+	end)
 	UserInputService.InputBegan:Connect(function(input)
 		if not menu.Visible then
 			return

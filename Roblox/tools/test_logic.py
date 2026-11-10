@@ -43,9 +43,11 @@ def main():
     config = load("Config")
     omni_mod = load("Omnitrix")
     pose = load("Pose")
+    progression = load("Progression")
+    heat = load("Heat")
 
     tests = lua.execute(r"""
-      return function(Config, Omnitrix, Pose)
+      return function(Config, Omnitrix, Pose, Progression, Heat)
         local fails = {}
         local function expect(cond, what)
             if not cond then table.insert(fails, what) end
@@ -139,10 +141,52 @@ def main():
         expect(roll.BodyPitch > 90, "dodge is a forward roll")
         local tig = Pose.Compute({ Hero = "ElTigre", Grounded = true, AttackAnim = 0.19, AttackDur = 0.38, AttackStep = 2, Time = 1 })
         expect(tig.Spin > 0, "El Tigre's finisher spins")
+        -- Progression: XP curve, level-ups, skills, prices.
+        local prof = { Level = 1, Xp = 0, SkillPoints = 0, Skills = {} }
+        expect(Progression.xpToNext(1, Config) == 100, "100 XP to level 2")
+        expect(Progression.addXp(prof, 99, Config) == 0 and prof.Level == 1, "no level below threshold")
+        expect(Progression.addXp(prof, 1, Config) == 1 and prof.Level == 2 and prof.Xp == 0 and prof.SkillPoints == 1, "level up at threshold")
+        local gained = Progression.addXp(prof, 1e12, Config)
+        expect(prof.Level == Config.Progression.MaxLevel and gained == Config.Progression.MaxLevel - 2, "caps at max level")
+        expect(Progression.buySkill(prof, "Power", Config) and prof.Skills.Power == 1, "buy a skill")
+        expect(not Progression.buySkill(prof, "Nope", Config), "unknown skill refused")
+        for _ = 1, 10 do Progression.buySkill(prof, "Power", Config) end
+        expect(prof.Skills.Power == Config.Skills.Power.Max, "skill rank capped")
+        local broke = { Level = 1, Xp = 0, SkillPoints = 0, Skills = {} }
+        expect(not Progression.buySkill(broke, "Power", Config), "no points, no skill")
+        local fx = Progression.effects({ Power = 5, Vitality = 2 })
+        expect(math.abs(fx.Damage - 1.4) < 1e-6 and fx.MaxHealth == 24 and fx.Walk == 1, "skill effects")
+        expect(Progression.skillPointPrice(0, Config) == 250 and Progression.skillPointPrice(1, Config) == 375, "skill point prices rise")
+
+        -- Heat: chaos raises stars, squads spawn, cooling needs quiet and no hunters.
+        local h = Heat.new(Config)
+        expect(h:Stars() == 0 and h:Tick(1, 0, false) == 0, "no heat, no squads")
+        h:AddChaos(1.2, 0)
+        expect(h:Stars() == 1, "one star")
+        local spawned = 0
+        for i = 1, 40 do spawned = spawned + h:Tick(1, i * 0.1, true) end
+        expect(spawned == Config.Heat.SquadSize[1], "a squad after the interval")
+        expect(not h:Cooling(5, false), "no cooling right after chaos")
+        expect(not h:Cooling(100, true), "no cooling with hunters near")
+        for i = 1, 200 do h:Tick(1, 1000 + i, false) end
+        expect(h:Stars() == 0, "stars cool off when you lie low")
+        local hot = Heat.new(Config)
+        hot:AddChaos(99, 0)
+        expect(hot:Stars() == Config.Heat.Max, "capped at max stars")
+
+        -- New poses produce finite angles too.
+        for _, extra in ipairs({ { Slide = true }, { WallRun = true, WallSide = 1 }, { Climb = true }, { Swing = true, VelY = 10 },
+                                 { Counter = 0.2 }, { Block = 0.3 }, { Takedown = 0.3 } }) do
+            extra.Hero, extra.Time, extra.Grounded = "Jake", 2, false
+            local O = Pose.Compute(extra)
+            for k, v in pairs(O) do
+                if type(v) == "number" then expect(finite(v), "new pose " .. k) end
+            end
+        end
         return fails, count
       end
     """)
-    fails, count = tests(config, omni_mod, pose)
+    fails, count = tests(config, omni_mod, pose, progression, heat)
     fails = list(fails.values())
     for f in fails:
         print("FAIL", f)

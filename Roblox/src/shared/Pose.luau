@@ -418,6 +418,69 @@ function Pose.Compute(st)
 		end
 	end
 
+	-- Parkour and combat moves (newer open-world action-game staples).
+	local tm = t
+	if st.Slide then
+		-- Feet-first slide.
+		O.Lean = -28
+		leg(1, 85, 10, 1)
+		leg(2, 35, 95, 1)
+		arm(1, -35, 35, 20, 1)
+		arm(2, 20, 30, 40, 1)
+		O.Bob = O.Bob - 22
+		O.HeadPitch = 10
+	end
+	if st.WallRun then
+		-- Running along a wall: fast cycle, body tilted away from it.
+		local p2 = tm * 14
+		O.Thigh[1] = 45 * sin(p2)
+		O.Thigh[2] = -45 * sin(p2)
+		O.Knee[1] = 20 + 60 * max(0, cos(p2))
+		O.Knee[2] = 20 + 60 * max(0, -cos(p2))
+		O.ShFwd[1] = -40 * sin(p2)
+		O.ShFwd[2] = 40 * sin(p2)
+		O.Lean = 12
+		O.BodyRoll = -(st.WallSide or 1) * 28
+	end
+	if st.Climb then
+		-- Scrambling straight up a wall, hand over hand.
+		local p3 = tm * 10
+		arm(1, 150 + sin(p3) * 25, 20, 40 + sin(p3) * 30, 1)
+		arm(2, 150 - sin(p3) * 25, 20, 40 - sin(p3) * 30, 1)
+		leg(1, 55 + sin(p3) * 25, 70, 1)
+		leg(2, 55 - sin(p3) * 25, 70, 1)
+		O.Lean = -8
+		O.HeadPitch = -20
+	end
+	if st.Swing then
+		-- Swinging on a line: lead arm up holding it, legs swing with the arc.
+		arm(2, 175, 5, 10, 1)
+		arm(1, 30, 40, 40, 1)
+		local swingK = clamp((st.VelY or 0) / 40, -1, 1)
+		leg(1, 30 - swingK * 30, 40, 1)
+		leg(2, 10 - swingK * 30, 25, 1)
+		O.Lean = -swingK * 15
+	end
+	if (st.Counter or 0) > 0 then
+		-- Counter strike: quick backhand and lean in.
+		local c = st.Counter / 0.3
+		arm(2, 100, -40 + 80 * (1 - c), 10, 1)
+		O.ChestTwist = O.ChestTwist + 35 * c
+		O.Lean = O.Lean + 12
+	elseif (st.Block or 0) > 0 then
+		arm(1, 95, -35, 110, 1)
+		arm(2, 95, -35, 110, 1)
+		O.Lean = O.Lean - 5
+	end
+	if (st.Takedown or 0) > 0 then
+		-- Special takedown: leap and a two-handed hammer blow.
+		local k = 1 - st.Takedown / 0.6
+		arm(1, 170 - 140 * k, 10, 20, 1)
+		arm(2, 170 - 140 * k, 10, 20, 1)
+		O.BodyPitch = O.BodyPitch + 30 * sin(PI * k)
+		O.Bob = O.Bob + 15 * sin(PI * k)
+	end
+
 	-- Flight.
 	if flying then
 		local fwd = clamp(speed3 / 50, 0, 1)

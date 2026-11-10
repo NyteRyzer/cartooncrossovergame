@@ -153,6 +153,8 @@ local function remoteState(character, c, dt)
 		Scooter = character:GetAttribute("MvScooter"), Intangible = character:GetAttribute("MvIntangible"),
 		TakeoffTime = character:GetAttribute("MvTakeoff") and 0.3 or 0, Breath = character:GetAttribute("MvBreath"),
 		WalkPhase = c.WalkPhase, IdleTime = c.IdleTime,
+		Slide = character:GetAttribute("MvSlide"), WallRun = character:GetAttribute("MvWallRun"), WallSide = character:GetAttribute("MvWallSide") or 0,
+		Climb = character:GetAttribute("MvClimb"), Swing = character:GetAttribute("MvSwing"),
 	}
 end
 
@@ -168,6 +170,8 @@ local function localState(c)
 		FlipTime = S.FlipTime, WallSlide = S.WallSlide, FlyBank = S.FlyBank, FlyPitch = S.FlyPitch, Boosting = S.Boosting,
 		TakeoffTime = S.TakeoffTime, Breath = S.Breath, Jetpack = S.Jetpack > 0, Scooter = S.Scooter > 0,
 		Intangible = S.Intangible, WalkPhase = S.WalkPhase,
+		Slide = S.Slide > 0, WallRun = S.WallRun ~= nil, WallSide = S.WallRun and S.WallRun.Side or 0, Climb = S.Climb,
+		Swing = S.Swing ~= nil, Counter = S.CounterAnim, Block = S.BlockAnim, Takedown = S.TakedownAnim,
 	}
 end
 
@@ -186,6 +190,17 @@ local function animate(character, c, dt, now, serverNow)
 			st.AttackAnim = math.max(0, dur - (serverNow - at))
 			st.AttackDur = dur
 			st.AttackStep = character:GetAttribute("AttackStep") or 0
+		end
+	end
+	if not isLocal then
+		-- Counters and blocks come from the server's record.
+		local counterAt = character:GetAttribute("CounterAt")
+		if counterAt then
+			st.Counter = math.max(0, 0.3 - (serverNow - counterAt))
+		end
+		local blockAt = character:GetAttribute("BlockAt")
+		if blockAt then
+			st.Block = math.max(0, 0.5 - (serverNow - blockAt))
 		end
 	end
 	local hurtAt = character:GetAttribute("HurtAt")

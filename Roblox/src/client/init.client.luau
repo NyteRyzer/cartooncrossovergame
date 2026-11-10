@@ -3,7 +3,7 @@
 -- them together, start begins loops and connections).
 
 local controllers = {}
-local order = { "Input", "Hud", "CameraRig", "Movement", "Animator", "Effects", "Companions", "Vehicle" }
+local order = { "Input", "Hud", "CameraRig", "Movement", "CombatAssist", "Animator", "Effects", "Companions", "Vehicle", "Minimap" }
 for _, name in ipairs(order) do
 	local module = script:WaitForChild("Controllers"):WaitForChild(name, 10)
 	if module then

@@ -10,12 +10,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MapData = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MapData"))
 
 local Courses = {}
-local Net
+local Net, Profiles, Progression
 local courses = {}  -- { Name, Gates = { { Part, Pos, Radius } } }
 local runs = {}     -- [player][courseIndex] = { Next, Start, Best }
 
 function Courses.init(systems)
-	Net = systems.Net
+	Net, Profiles, Progression = systems.Net, systems.Profiles, systems.Progression
 end
 
 function Courses.start()
@@ -67,10 +67,17 @@ function Courses.start()
 						run.Next = run.Next + 1
 						if run.Next > #course.Gates then
 							local time = now - run.Start
+							local data = Profiles.get(player)
+							local saved = data and data.Best[course.Name]
+							run.Best = run.Best or saved
 							local best = not run.Best or time < run.Best
 							if best then
 								run.Best = time
+								if data then
+									data.Best[course.Name] = math.floor(time * 100) / 100
+								end
 							end
+							Progression.award(player, best and 100 or 50, best and 60 or 25, course.Name)
 							Net.fire("Notify", player, { Banner = ("%s: %.2fs%s"):format(course.Name, time, best and "  NEW BEST!" or ""), Color = Color3.fromRGB(140, 255, 200) })
 							run.Next = 1
 						end

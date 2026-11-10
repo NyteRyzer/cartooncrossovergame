@@ -104,7 +104,7 @@ local function buildTerminal(t)
 end
 
 -- Jimmy's retro hover convertible: a seat on a hover body the driver's client flies.
-local function buildHoverCar(pos, yaw)
+function World.buildHoverCar(pos, yaw, bodyColor)
 	local model = Instance.new("Model")
 	model.Name = "HoverCar"
 	local base = CFrame.new(pos + Vector3.new(0, 3, 0)) * CFrame.Angles(0, math.rad(yaw), 0)
@@ -123,7 +123,7 @@ local function buildHoverCar(pos, yaw)
 		p.Parent = model
 		return p
 	end
-	local body = part("Body", Vector3.new(6.5, 1.6, 12), CFrame.new(), Color3.fromRGB(210, 40, 40))
+	local body = part("Body", Vector3.new(6.5, 1.6, 12), CFrame.new(), bodyColor or Color3.fromRGB(210, 40, 40))
 	part("Fin", Vector3.new(6.7, 0.5, 3), CFrame.new(0, 0.9, 4.5), Color3.fromRGB(240, 240, 245))
 	part("Windshield", Vector3.new(5.6, 1.4, 0.2), CFrame.new(0, 1.5, -2) * CFrame.Angles(math.rad(-20), 0, 0), Color3.fromRGB(150, 220, 255), Enum.Material.Glass).Transparency = 0.4
 	part("Grille", Vector3.new(5, 0.8, 0.3), CFrame.new(0, -0.1, -6.1), Color3.fromRGB(220, 220, 230), Enum.Material.Metal)
@@ -200,6 +200,7 @@ local function buildHoverCar(pos, yaw)
 			end)
 		end
 	end)
+	return model
 end
 
 function World.init(systems)
@@ -228,13 +229,29 @@ function World.init(systems)
 	end)
 end
 
+-- Day and night: a full day every Config.DayLengthSeconds.
+local function dayNight()
+	local Lighting = game:GetService("Lighting")
+	local start = Lighting.ClockTime
+	local t0 = os.clock()
+	while true do
+		local hours = (start + (os.clock() - t0) / Config.DayLengthSeconds * 24) % 24
+		Lighting.ClockTime = hours
+		local night = hours < 6 or hours > 19
+		Lighting.Brightness = night and 1.2 or 2.6
+		workspace:SetAttribute("Night", night)
+		task.wait(1)
+	end
+end
+
 function World.start()
+	task.spawn(dayNight)
 	for _, t in ipairs(terminals) do
 		buildTerminal(t)
 	end
 	for _, level in pairs(MapData.Levels) do
 		for _, car in ipairs(level.HoverCars) do
-			buildHoverCar(car.Pos, car.Yaw)
+			World.buildHoverCar(car.Pos, car.Yaw)
 		end
 	end
 	local function hook(player)

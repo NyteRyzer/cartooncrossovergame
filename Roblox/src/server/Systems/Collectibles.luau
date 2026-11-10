@@ -12,7 +12,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local MapData = require(Shared:WaitForChild("MapData"))
 
 local Collectibles = {}
-local Net, PlayerState
+local Net, PlayerState, Profiles, Progression
 local shards = {}  -- { Id, Pos, Level }
 local taken = {}   -- [player] = { [id] = true }
 
@@ -90,7 +90,21 @@ local function buildShard(id, pos, folder)
 end
 
 function Collectibles.init(systems)
-	Net, PlayerState = systems.Net, systems.Players
+	Net, PlayerState, Profiles, Progression = systems.Net, systems.Players, systems.Profiles, systems.Progression
+end
+
+-- Counts per level for the HUD.
+local function syncCounts(player, mine)
+	local have, totals = {}, {}
+	for _, s in ipairs(shards) do
+		totals[s.Level] = (totals[s.Level] or 0) + 1
+		if mine[s.Id] then
+			have[s.Level] = (have[s.Level] or 0) + 1
+		end
+	end
+	for level in pairs(totals) do
+		player:SetAttribute("Shards_" .. level, have[level] or 0)
+	end
 end
 
 function Collectibles.start()
@@ -116,11 +130,23 @@ function Collectibles.start()
 		workspace:SetAttribute("ShardTotal_" .. levelName, n)
 	end
 
+	-- Saved shards come back with the profile (and are hidden for that player).
+	Profiles.onLoaded(function(player, data)
+		local mine = taken[player] or {}
+		taken[player] = mine
+		for _, id in ipairs(data.Shards) do
+			if shards[id] then
+				mine[id] = true
+				Net.fire("Fx", player, { Kind = "ShardTaken", Id = id, Pos = shards[id].Pos, Silent = true })
+			end
+		end
+		syncCounts(player, mine)
+	end)
 	Players.PlayerAdded:Connect(function(player)
-		taken[player] = {}
+		taken[player] = taken[player] or {}
 	end)
 	for _, player in ipairs(Players:GetPlayers()) do
-		taken[player] = {}
+		taken[player] = taken[player] or {}
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		taken[player] = nil
@@ -160,6 +186,11 @@ function Collectibles.start()
 							end
 						end
 						player:SetAttribute("Shards_" .. s.Level, have)
+						local data = Profiles.get(player)
+						if data then
+							table.insert(data.Shards, s.Id)
+						end
+						Progression.award(player, 15, 10, "Rift shard")
 						Net.fire("Fx", player, { Kind = "ShardTaken", Id = s.Id, Pos = s.Pos })
 						Net.fire("Notify", player, {
 							Text = ("Rift shard %d/%d (+health, energy, ultimate)"):format(have, total),

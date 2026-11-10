@@ -20,6 +20,7 @@ local STATE_KEYS = {
 	Flying = "boolean", Gliding = "boolean", Dodge = "boolean", DodgeAir = "boolean", Pounding = "boolean",
 	Emote = "boolean", WallSlide = "boolean", Boosting = "boolean", Jetpack = "boolean", Scooter = "boolean",
 	Intangible = "boolean", Takeoff = "boolean", Grapple = "boolean", Breath = "boolean",
+	Slide = "boolean", WallRun = "boolean", Climb = "boolean", Swing = "boolean", WallSide = "number", Lunge = "boolean",
 	DodgeSide = "number", FlyBank = "number", FlyPitch = "number",
 }
 

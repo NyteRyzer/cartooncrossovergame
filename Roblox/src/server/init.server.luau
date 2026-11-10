@@ -3,7 +3,10 @@
 -- for all of them before any start (loops, connections that need others).
 
 local systems = {}
-local order = { "Net", "Players", "Heroes", "World", "Enemies", "Combat", "Collectibles", "Courses" }
+local order = {
+	"Net", "Players", "Profiles", "Heroes", "World", "Progression", "Heat", "Enemies", "Combat", "Boss",
+	"Collectibles", "Courses", "Missions", "Traffic",
+}
 for _, name in ipairs(order) do
 	local module = script:WaitForChild("Systems"):FindFirstChild(name)
 	if module then

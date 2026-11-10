@@ -29,6 +29,10 @@ function PlayerState.new(player)
 		Kills = 0,
 		Shards = 0,
 		RegenAt = 0,
+		Combo = 0,
+		ComboAt = 0,
+		DamageMul = 1,
+		MeterMul = 1,
 	}
 end
 
